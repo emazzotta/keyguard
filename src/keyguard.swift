@@ -264,18 +264,25 @@ case "set":
     }
     setKey(name: args[2], value: value)
 
-case "delete":
+case "delete", "rm":
     guard args.count == 3 else { fputs("Usage: keyguard delete <KEY>\n", stderr); exit(1) }
     deleteKey(name: args[2])
 
 case "get":
-    guard args.count == 3 else { fputs("Usage: keyguard get <KEY>\n", stderr); exit(1) }
-    let env = parseEnv(decrypt(reason: "Reveal \(args[2])"))
-    guard let value = env[args[2]] else {
-        fputs("Key '\(args[2])' not found\n", stderr)
+    guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...]\n", stderr); exit(1) }
+    let keys = Array(args[2...])
+    let reason = "Reveal \(keys.joined(separator: ", "))"
+    let env = parseEnv(decrypt(reason: reason))
+    let missing = keys.filter { env[$0] == nil }
+    if !missing.isEmpty {
+        fputs("Keys not found: \(missing.joined(separator: ", "))\n", stderr)
         exit(1)
     }
-    print(value, terminator: "")
+    if keys.count == 1 {
+        print(env[keys[0]]!, terminator: "")
+    } else {
+        keys.forEach { print("\($0)=\(env[$0]!)") }
+    }
 
 case "list":
     parseEnv(decrypt(reason: "List secrets")).keys.sorted().forEach { print($0) }

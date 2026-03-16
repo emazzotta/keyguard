@@ -35,13 +35,14 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(403, b"Forbidden")
             return
 
-        name = urlparse(self.path).path.strip("/")
-        if not name:
+        path = urlparse(self.path).path.strip("/")
+        if not path:
             self._respond(400, b"Missing secret name")
             return
 
+        keys = [k.strip() for k in path.split(",") if k.strip()]
         result = subprocess.run(
-            [str(KEYGUARD_BIN), "get", name],
+            [str(KEYGUARD_BIN), "get"] + keys,
             capture_output=True,
             text=True,
         )

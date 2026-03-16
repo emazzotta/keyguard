@@ -6,12 +6,12 @@ A lightweight, local secret manager for macOS. Encrypts secrets on disk with AES
 
 ```
 Docker container
-  └── curl http://host.docker.internal:7777/MY_API_TOKEN
+  └── curl http://host.docker.internal:7777/TOKEN,PASSWORD
         └── keyguard-server (host, port 7777)
-              └── keyguard get MY_API_TOKEN
-                    ├── Touch ID prompt: "Reveal MY_API_TOKEN"
+              └── keyguard get TOKEN PASSWORD
+                    ├── Touch ID prompt: "Reveal TOKEN, PASSWORD"
                     ├── AES-256-GCM decrypt ~/.keyguard/secrets.enc
-                    └── return value
+                    └── return TOKEN=value\nPASSWORD=value
 ```
 
 Secrets never exist in plaintext on disk. The encrypted file is the source of truth. Every read requires a fingerprint.
@@ -55,6 +55,14 @@ keyguard set MY_API_TOKEN
 # Value for MY_API_TOKEN: ▌
 ```
 
+**Get one or multiple secrets:**
+```bash
+keyguard get MY_API_TOKEN                    # returns raw value
+keyguard get MY_API_TOKEN PASSWORD DB_URL    # returns KEY=value lines
+```
+
+Touch ID prompt shows exactly what is being revealed: `"Reveal MY_API_TOKEN, PASSWORD, DB_URL"`.
+
 **Other commands (all require Touch ID):**
 ```bash
 keyguard list                  # list key names
@@ -68,10 +76,11 @@ keyguard clear                 # wipe everything (secrets file + encryption key)
 From inside any Docker container on the same machine:
 
 ```bash
-curl http://host.docker.internal:7777/MY_API_TOKEN
+curl http://host.docker.internal:7777/MY_API_TOKEN          # single value
+curl http://host.docker.internal:7777/MY_API_TOKEN,PASSWORD  # KEY=value lines
 ```
 
-Every request triggers a Touch ID prompt on the host. The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
+Every request triggers a Touch ID prompt on the host showing the exact key names being revealed. The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
 
 ## Custom secrets file path
 
@@ -81,7 +90,7 @@ By default secrets are stored at `~/.keyguard/secrets.enc`. Override with an env
 export KEYGUARD_SECRETS_FILE=~/Dropbox/keyguard/secrets.enc
 ```
 
-Set this in both your shell profile and the launchd plist (via `make uninstall` + editing the plist + `make install`) if you want the server to use the custom path.
+Set this in your shell profile before running `make install` — the value is baked into the launchd plist automatically so the server always uses the correct path.
 
 ## Makefile targets
 
