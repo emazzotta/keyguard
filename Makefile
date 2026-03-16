@@ -4,6 +4,7 @@
 PREFIX        ?= /usr/local
 LAUNCH_AGENTS := $(HOME)/Library/LaunchAgents
 LOGS_DIR      := $(HOME)/Library/Logs
+SECRETS_FILE  ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.enc)
 
 BINARY     := $(PREFIX)/bin/keyguard
 SERVER_DIR := $(PREFIX)/lib/keyguard
@@ -42,7 +43,7 @@ install: build ## Install binary, server, and register launchd agent
 	sudo install -m 755 bin/keyguard "$(BINARY)"
 	sudo install -m 644 src/keyguard-server.py "$(SERVER)"
 	mkdir -p "$(LAUNCH_AGENTS)" "$(LOGS_DIR)"
-	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g' \
+	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g' \
 		com.keyguard.server.plist > "$(PLIST)"
 	@echo "Installed. Run 'make start' to start the server."
 

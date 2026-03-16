@@ -9,6 +9,11 @@
         <string>/usr/bin/python3</string>
         <string>__PREFIX__/lib/keyguard/keyguard-server.py</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>KEYGUARD_SECRETS_FILE</key>
+        <string>__SECRETS_FILE__</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
