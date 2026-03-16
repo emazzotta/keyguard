@@ -224,11 +224,14 @@ func importEnv(path: String) {
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    fputs("Usage: keyguard <import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    fputs("Usage: keyguard <clear|import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
     exit(1)
 }
 
 switch args[1] {
+case "clear":
+    clearSecrets()
+
 case "import":
     guard args.count == 3 else { fputs("Usage: keyguard import <path-to-.env>\n", stderr); exit(1) }
     importEnv(path: args[2])
@@ -267,6 +270,6 @@ case "export":
     print(decrypt(reason: "Export all secrets"), terminator: "")
 
 default:
-    fputs("Unknown command '\(args[1])'\nUsage: keyguard <import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    fputs("Unknown command '\(args[1])'\nUsage: keyguard <clear|import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
     exit(1)
 }
