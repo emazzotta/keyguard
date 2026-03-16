@@ -17,15 +17,15 @@ func authenticate(reason: String) {
     let context = LAContext()
     var error: NSError?
 
-    guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-        fputs("Authentication unavailable: \(error?.localizedDescription ?? "unknown")\n", stderr)
+    guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+        fputs("Biometrics unavailable: \(error?.localizedDescription ?? "unknown")\n", stderr)
         exit(1)
     }
 
     let semaphore = DispatchSemaphore(value: 0)
     var succeeded = false
 
-    context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, err in
+    context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, err in
         succeeded = success
         if !success, let err = err {
             fputs("Authentication failed: \(err.localizedDescription)\n", stderr)
@@ -81,7 +81,7 @@ func decrypt(reason: String) -> String {
     authenticate(reason: reason)
 
     guard let combined = try? Data(contentsOf: SECRETS_FILE) else {
-        fputs("No secrets file found. Use 'keyguard set KEY' to create one.\n", stderr)
+        fputs("No secrets file found. Use 'keyguard set KEY' or 'keyguard import <path>' to create one.\n", stderr)
         exit(1)
     }
 
@@ -116,11 +116,23 @@ func encrypt(_ content: String, using key: SymmetricKey) {
 func parseEnv(_ content: String) -> [String: String] {
     var entries: [String: String] = [:]
     for line in content.components(separatedBy: .newlines) {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+        if trimmed.hasPrefix("export ") {
+            trimmed = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+        }
         let parts = trimmed.split(separator: "=", maxSplits: 1)
         guard parts.count == 2 else { continue }
-        entries[String(parts[0])] = String(parts[1])
+        let key = String(parts[0])
+        var value = String(parts[1])
+        if let range = value.range(of: #"\s+#.*$"#, options: .regularExpression) {
+            value = String(value[value.startIndex..<range.lowerBound])
+        }
+        if (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
+           (value.hasPrefix("'") && value.hasSuffix("'")) {
+            value = String(value.dropFirst().dropLast())
+        }
+        entries[key] = value
     }
     return entries
 }
@@ -175,6 +187,7 @@ func deleteKey(name: String) {
 }
 
 func clearSecrets() {
+    authenticate(reason: "Clear all secrets")
     try? FileManager.default.removeItem(at: SECRETS_FILE)
 
     let deleteQuery: [String: Any] = [
@@ -240,6 +253,7 @@ case "set":
     guard args.count >= 3 else { fputs("Usage: keyguard set <KEY> [value]\n", stderr); exit(1) }
     let value: String
     if args.count == 4 {
+        fputs("Warning: inline values are saved in shell history\n", stderr)
         value = args[3]
     } else {
         fputs("Value for \(args[2]): ", stderr)

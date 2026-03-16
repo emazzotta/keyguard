@@ -1,5 +1,5 @@
 .PHONY: all build clean install uninstall start stop restart status help
-.DEFAULT_GOAL := help
+.DEFAULT_GOAL := all
 
 PREFIX        ?= /usr/local
 LAUNCH_AGENTS := $(HOME)/Library/LaunchAgents
