@@ -46,13 +46,12 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             text=True,
         )
 
-        match result.returncode:
-            case 0:
-                self._respond(200, result.stdout.encode(), "text/plain")
-            case 2:
-                self._respond(403, b"Touch ID cancelled or failed")
-            case _:
-                self._respond(500, result.stderr.encode())
+        if result.returncode == 0:
+            self._respond(200, result.stdout.encode(), "text/plain")
+        elif result.returncode == 2:
+            self._respond(403, b"Touch ID cancelled or failed")
+        else:
+            self._respond(500, result.stderr.encode())
 
     def _respond(self, code: int, body: bytes, content_type: str = "text/plain") -> None:
         self.send_response(code)
