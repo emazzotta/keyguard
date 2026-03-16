@@ -1,0 +1,215 @@
+import CryptoKit
+import Foundation
+import LocalAuthentication
+import Security
+
+let KEYCHAIN_SERVICE = "keyguard"
+let KEYCHAIN_ACCOUNT = "encryption-key"
+let SECRETS_FILE = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent(".keyguard/secrets.enc")
+
+func authenticate(reason: String) {
+    let context = LAContext()
+    var error: NSError?
+
+    guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+        fputs("Authentication unavailable: \(error?.localizedDescription ?? "unknown")\n", stderr)
+        exit(1)
+    }
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var succeeded = false
+
+    context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, err in
+        succeeded = success
+        if !success, let err = err {
+            fputs("Authentication failed: \(err.localizedDescription)\n", stderr)
+        }
+        semaphore.signal()
+    }
+    semaphore.wait()
+
+    guard succeeded else { exit(2) }
+}
+
+func storeKey(_ key: SymmetricKey) {
+    let keyData = key.withUnsafeBytes { Data($0) }
+
+    let deleteQuery: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: KEYCHAIN_SERVICE,
+        kSecAttrAccount as String: KEYCHAIN_ACCOUNT
+    ]
+    SecItemDelete(deleteQuery as CFDictionary)
+
+    let addQuery: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: KEYCHAIN_SERVICE,
+        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
+        kSecValueData as String: keyData,
+        kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+    ]
+
+    let status = SecItemAdd(addQuery as CFDictionary, nil)
+    guard status == errSecSuccess else {
+        fputs("Failed to store key: \(status)\n", stderr)
+        exit(1)
+    }
+}
+
+func loadKey() -> SymmetricKey? {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: KEYCHAIN_SERVICE,
+        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
+        kSecReturnData as String: true
+    ]
+
+    var item: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+    guard status == errSecSuccess, let keyData = item as? Data else { return nil }
+    return SymmetricKey(data: keyData)
+}
+
+func decrypt(reason: String) -> String {
+    authenticate(reason: reason)
+
+    guard let combined = try? Data(contentsOf: SECRETS_FILE) else {
+        fputs("No secrets file found. Use 'keyguard set KEY' to create one.\n", stderr)
+        exit(1)
+    }
+
+    guard let key = loadKey(),
+          let sealed = try? AES.GCM.SealedBox(combined: combined),
+          let decrypted = try? AES.GCM.open(sealed, using: key),
+          let content = String(data: decrypted, encoding: .utf8) else {
+        fputs("Decryption failed\n", stderr)
+        exit(1)
+    }
+
+    return content
+}
+
+func encrypt(_ content: String, using key: SymmetricKey) {
+    guard let data = content.data(using: .utf8),
+          let sealed = try? AES.GCM.seal(data, using: key),
+          let combined = sealed.combined else {
+        fputs("Encryption failed\n", stderr)
+        exit(1)
+    }
+
+    let dir = SECRETS_FILE.deletingLastPathComponent()
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+    guard (try? combined.write(to: SECRETS_FILE)) != nil else {
+        fputs("Failed to write \(SECRETS_FILE.path)\n", stderr)
+        exit(1)
+    }
+}
+
+func parseEnv(_ content: String) -> [String: String] {
+    var entries: [String: String] = [:]
+    for line in content.components(separatedBy: .newlines) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+        let parts = trimmed.split(separator: "=", maxSplits: 1)
+        guard parts.count == 2 else { continue }
+        entries[String(parts[0])] = String(parts[1])
+    }
+    return entries
+}
+
+func serializeEnv(_ entries: [String: String]) -> String {
+    entries.keys.sorted().map { "\($0)=\(entries[$0]!)" }.joined(separator: "\n")
+}
+
+func setKey(name: String, value: String) {
+    let key: SymmetricKey
+    var entries: [String: String]
+
+    if FileManager.default.fileExists(atPath: SECRETS_FILE.path) {
+        authenticate(reason: "Update \(name)")
+        guard let existingKey = loadKey(),
+              let combined = try? Data(contentsOf: SECRETS_FILE),
+              let sealed = try? AES.GCM.SealedBox(combined: combined),
+              let decrypted = try? AES.GCM.open(sealed, using: existingKey),
+              let content = String(data: decrypted, encoding: .utf8) else {
+            fputs("Failed to read existing secrets\n", stderr)
+            exit(1)
+        }
+        key = existingKey
+        entries = parseEnv(content)
+    } else {
+        key = SymmetricKey(size: .bits256)
+        storeKey(key)
+        entries = [:]
+    }
+
+    entries[name] = value
+    encrypt(serializeEnv(entries), using: key)
+    print("Set '\(name)'")
+}
+
+func deleteKey(name: String) {
+    let content = decrypt(reason: "Delete \(name)")
+    guard let key = loadKey() else {
+        fputs("No encryption key found\n", stderr)
+        exit(1)
+    }
+
+    var entries = parseEnv(content)
+    guard entries[name] != nil else {
+        fputs("Key '\(name)' not found\n", stderr)
+        exit(1)
+    }
+
+    entries.removeValue(forKey: name)
+    encrypt(serializeEnv(entries), using: key)
+    print("Deleted '\(name)'")
+}
+
+let args = CommandLine.arguments
+guard args.count >= 2 else {
+    fputs("Usage: keyguard <set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    exit(1)
+}
+
+switch args[1] {
+case "set":
+    guard args.count >= 3 else { fputs("Usage: keyguard set <KEY> [value]\n", stderr); exit(1) }
+    let value: String
+    if args.count == 4 {
+        value = args[3]
+    } else {
+        fputs("Value for \(args[2]): ", stderr)
+        guard let input = readLine(strippingNewline: true), !input.isEmpty else {
+            fputs("No value provided\n", stderr); exit(1)
+        }
+        value = input
+    }
+    setKey(name: args[2], value: value)
+
+case "delete":
+    guard args.count == 3 else { fputs("Usage: keyguard delete <KEY>\n", stderr); exit(1) }
+    deleteKey(name: args[2])
+
+case "get":
+    guard args.count == 3 else { fputs("Usage: keyguard get <KEY>\n", stderr); exit(1) }
+    let env = parseEnv(decrypt(reason: "Reveal \(args[2])"))
+    guard let value = env[args[2]] else {
+        fputs("Key '\(args[2])' not found\n", stderr)
+        exit(1)
+    }
+    print(value, terminator: "")
+
+case "list":
+    parseEnv(decrypt(reason: "List secrets")).keys.sorted().forEach { print($0) }
+
+case "export":
+    print(decrypt(reason: "Export all secrets"), terminator: "")
+
+default:
+    fputs("Unknown command '\(args[1])'\nUsage: keyguard <set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    exit(1)
+}
