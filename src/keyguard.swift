@@ -5,8 +5,13 @@ import Security
 
 let KEYCHAIN_SERVICE = "keyguard"
 let KEYCHAIN_ACCOUNT = "encryption-key"
-let SECRETS_FILE = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".keyguard/secrets.enc")
+let SECRETS_FILE: URL = {
+    if let custom = ProcessInfo.processInfo.environment["KEYGUARD_SECRETS_FILE"] {
+        return URL(fileURLWithPath: custom)
+    }
+    return FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".keyguard/secrets.enc")
+}()
 
 func authenticate(reason: String) {
     let context = LAContext()
@@ -169,13 +174,65 @@ func deleteKey(name: String) {
     print("Deleted '\(name)'")
 }
 
+func clearSecrets() {
+    try? FileManager.default.removeItem(at: SECRETS_FILE)
+
+    let deleteQuery: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: KEYCHAIN_SERVICE,
+        kSecAttrAccount as String: KEYCHAIN_ACCOUNT
+    ]
+    SecItemDelete(deleteQuery as CFDictionary)
+    print("Cleared all secrets")
+}
+
+func importEnv(path: String) {
+    let url = URL(fileURLWithPath: path)
+    guard let incoming = try? String(contentsOf: url, encoding: .utf8) else {
+        fputs("Cannot read file: \(path)\n", stderr)
+        exit(1)
+    }
+
+    let key: SymmetricKey
+    var entries: [String: String]
+
+    if FileManager.default.fileExists(atPath: SECRETS_FILE.path) {
+        authenticate(reason: "Import \(url.lastPathComponent)")
+        guard let existingKey = loadKey(),
+              let combined = try? Data(contentsOf: SECRETS_FILE),
+              let sealed = try? AES.GCM.SealedBox(combined: combined),
+              let decrypted = try? AES.GCM.open(sealed, using: existingKey),
+              let content = String(data: decrypted, encoding: .utf8) else {
+            fputs("Failed to read existing secrets\n", stderr)
+            exit(1)
+        }
+        key = existingKey
+        entries = parseEnv(content)
+    } else {
+        key = SymmetricKey(size: .bits256)
+        storeKey(key)
+        entries = [:]
+    }
+
+    let incoming_entries = parseEnv(incoming)
+    entries.merge(incoming_entries) { _, new in new }
+    encrypt(serializeEnv(entries), using: key)
+
+    print("Imported \(incoming_entries.count) keys from \(url.lastPathComponent) → \(SECRETS_FILE.path)")
+    print("You can now delete the plaintext file: rm \(url.path)")
+}
+
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    fputs("Usage: keyguard <set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    fputs("Usage: keyguard <import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
     exit(1)
 }
 
 switch args[1] {
+case "import":
+    guard args.count == 3 else { fputs("Usage: keyguard import <path-to-.env>\n", stderr); exit(1) }
+    importEnv(path: args[2])
+
 case "set":
     guard args.count >= 3 else { fputs("Usage: keyguard set <KEY> [value]\n", stderr); exit(1) }
     let value: String
@@ -210,6 +267,6 @@ case "export":
     print(decrypt(reason: "Export all secrets"), terminator: "")
 
 default:
-    fputs("Unknown command '\(args[1])'\nUsage: keyguard <set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    fputs("Unknown command '\(args[1])'\nUsage: keyguard <import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
     exit(1)
 }

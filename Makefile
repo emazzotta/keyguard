@@ -19,11 +19,15 @@ help: ## Show available targets
 	@echo "    curl http://host.docker.internal:7777/<secret-name>"
 	@echo ""
 	@echo "  Manage secrets (run on host):"
+	@echo "    keyguard import path/to/.env   # bulk import from plaintext (then delete source)"
 	@echo "    keyguard set MY_API_TOKEN      # set a value (prompts for input)"
 	@echo "    keyguard set MY_API_TOKEN val  # set a value inline"
 	@echo "    keyguard delete MY_API_TOKEN   # remove a key (requires Touch ID)"
 	@echo "    keyguard list                  # list key names (requires Touch ID)"
 	@echo "    keyguard export                # print all values (requires Touch ID)"
+	@echo ""
+	@echo "  Custom secrets file path:"
+	@echo "    export KEYGUARD_SECRETS_FILE=/path/to/secrets.enc"
 
 build: bin/keyguard ## Compile the Swift binary
 
