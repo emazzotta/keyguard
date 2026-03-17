@@ -11,7 +11,7 @@ SERVER_DIR := $(PREFIX)/lib/keyguard
 SERVER     := $(SERVER_DIR)/keyguard-server.py
 PLIST      := $(LAUNCH_AGENTS)/com.keyguard.server.plist
 
-all: install restart ## Build, install, and restart the server
+all: clean build install restart ## Build, install, and restart the server
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'

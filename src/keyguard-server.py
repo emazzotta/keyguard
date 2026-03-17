@@ -40,9 +40,16 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(400, b"Missing secret name")
             return
 
+        if path == "_keys":
+            self._run_keyguard(["list"])
+            return
+
         keys = [k.strip() for k in path.split(",") if k.strip()]
+        self._run_keyguard(["get"] + keys)
+
+    def _run_keyguard(self, cmd_args: list[str]) -> None:
         result = subprocess.run(
-            [str(KEYGUARD_BIN), "get"] + keys,
+            [str(KEYGUARD_BIN)] + cmd_args,
             capture_output=True,
             text=True,
         )

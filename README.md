@@ -78,6 +78,7 @@ From inside any Docker container on the same machine:
 ```bash
 curl http://host.docker.internal:7777/MY_API_TOKEN          # single value
 curl http://host.docker.internal:7777/MY_API_TOKEN,PASSWORD  # KEY=value lines
+curl http://host.docker.internal:7777/_keys                  # list all key names
 ```
 
 Every request triggers a Touch ID prompt on the host showing the exact key names being revealed. The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
