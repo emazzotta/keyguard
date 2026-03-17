@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import LocalAuthentication
 import Security
@@ -141,6 +142,19 @@ func serializeEnv(_ entries: [String: String]) -> String {
     entries.keys.sorted().map { "\($0)=\(entries[$0]!)" }.joined(separator: "\n")
 }
 
+func readSecret() -> String? {
+    var tty = termios()
+    tcgetattr(STDIN_FILENO, &tty)
+    var noEcho = tty
+    noEcho.c_lflag &= ~UInt(ECHO)
+    tcsetattr(STDIN_FILENO, TCSANOW, &noEcho)
+    defer {
+        tcsetattr(STDIN_FILENO, TCSANOW, &tty)
+        fputs("\n", stderr)
+    }
+    return readLine(strippingNewline: true)
+}
+
 func setKey(name: String, value: String) {
     let key: SymmetricKey
     var entries: [String: String]
@@ -257,7 +271,7 @@ case "set":
         value = args[3]
     } else {
         fputs("Value for \(args[2]): ", stderr)
-        guard let input = readLine(strippingNewline: true), !input.isEmpty else {
+        guard let input = readSecret(), !input.isEmpty else {
             fputs("No value provided\n", stderr); exit(1)
         }
         value = input
