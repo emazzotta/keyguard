@@ -1,4 +1,4 @@
-.PHONY: all build clean install uninstall start stop restart status help
+.PHONY: all build test clean install uninstall start stop restart status help
 .DEFAULT_GOAL := all
 
 PREFIX        ?= /usr/local
@@ -33,10 +33,15 @@ help: ## Show available targets
 
 build: bin/keyguard ## Compile the Swift binary
 
-bin/keyguard: src/keyguard.swift
+bin/keyguard: Sources/keyguard/main.swift Sources/KeyguardCore/Logic.swift
+	swift build -c release 2>&1
 	mkdir -p bin
-	swiftc src/keyguard.swift -o bin/keyguard -framework Security -framework LocalAuthentication -framework CryptoKit
+	cp .build/release/keyguard bin/keyguard
 	codesign --sign - bin/keyguard
+
+test: ## Run all tests (Swift + Python)
+	swiftc -parse-as-library Sources/KeyguardCore/Logic.swift Tests/KeyguardCoreTests/LogicTests.swift -o bin/test-logic && bin/test-logic
+	python3 -m pytest Tests/ -v
 
 install: build ## Install binary, server, and register launchd agent
 	sudo install -d "$(PREFIX)/bin" "$(SERVER_DIR)"
