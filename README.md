@@ -27,7 +27,7 @@ Secrets never exist in plaintext on disk. The encrypted file is the source of tr
 ## Installation
 
 ```bash
-git clone <repo>
+git clone https://github.com/emazzotta/keyguard.git
 cd keyguard
 make
 ```
@@ -111,6 +111,9 @@ Set this in your shell profile before running `make install` — the value is ba
 | `make` | Build, install, and restart (default) |
 | `make build` | Compile the Swift binary |
 | `make install` | Install binary, server, and launchd agent |
+| `make test` | Run all tests (Swift + Python) |
+| `make test-swift` | Run Swift unit tests only |
+| `make test-python` | Run Python server tests only |
 | `make start` | Start the server |
 | `make stop` | Stop the server |
 | `make restart` | Restart the server |
