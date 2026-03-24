@@ -221,6 +221,14 @@ def test_post_keyguard_error_returns_500(server):
     assert "encryption failed" in body
 
 
+def test_post_oversized_body_returns_400(server):
+    conn = http.client.HTTPConnection(f"127.0.0.1:{server.server_address[1]}")
+    conn.request("POST", "/MY_TOKEN", body=b"x", headers={"Content-Length": "99999999"})
+    resp = conn.getresponse()
+
+    assert resp.status == 400
+
+
 def test_post_invalid_content_length_returns_400(server):
     conn = http.client.HTTPConnection(f"127.0.0.1:{server.server_address[1]}")
     conn.request("POST", "/MY_TOKEN", body=b"value", headers={"Content-Length": "not-a-number"})

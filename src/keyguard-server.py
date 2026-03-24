@@ -14,6 +14,7 @@ KEYGUARD_BIN: Final = Path("/usr/local/bin/keyguard")
 HOST: Final = "0.0.0.0"
 PORT: Final = 7777
 SUBPROCESS_TIMEOUT: Final = 60
+MAX_SECRET_BYTES: Final = 65_536
 
 ALLOWED_NETWORKS: Final = (
     IPv4Network("127.0.0.0/8"),       # loopback
@@ -45,6 +46,10 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
         except ValueError:
             self._respond(400, b"Invalid Content-Length")
+            return
+
+        if content_length > MAX_SECRET_BYTES:
+            self._respond(400, b"Request body too large")
             return
 
         try:
