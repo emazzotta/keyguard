@@ -253,10 +253,15 @@ case "set":
     if args.count == 4 {
         fputs("Warning: inline values are saved in shell history\n", stderr)
         value = args[3]
-    } else {
+    } else if isatty(STDIN_FILENO) != 0 {
         fputs("Value for \(args[2]): ", stderr)
         guard let input = readSecret(), !input.isEmpty else {
             fputs("No value provided\n", stderr); exit(1)
+        }
+        value = input
+    } else {
+        guard let input = readLine(strippingNewline: true), !input.isEmpty else {
+            fputs("No value provided via stdin\n", stderr); exit(1)
         }
         value = input
     }

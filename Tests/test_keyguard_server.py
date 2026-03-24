@@ -2,7 +2,7 @@ import http.client
 import importlib.util
 import subprocess
 import threading
-from http.server import HTTPServer
+from http.server import HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -24,9 +24,9 @@ KeyguardHandler = _module.KeyguardHandler
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def server():
-    srv = HTTPServer(("127.0.0.1", 0), KeyguardHandler)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), KeyguardHandler)
     thread = threading.Thread(target=srv.serve_forever)
     thread.daemon = True
     thread.start()
@@ -41,7 +41,7 @@ def server():
 
 def http_get(srv: HTTPServer, path: str) -> tuple[int, str]:
     conn = http.client.HTTPConnection(f"127.0.0.1:{srv.server_address[1]}")
-    conn.request("GET", path)
+    conn.request("GET", path, headers={"Connection": "close"})
     resp = conn.getresponse()
     return resp.status, resp.read().decode()
 
@@ -49,7 +49,7 @@ def http_get(srv: HTTPServer, path: str) -> tuple[int, str]:
 def http_post(srv: HTTPServer, path: str, body: str = "") -> tuple[int, str]:
     conn = http.client.HTTPConnection(f"127.0.0.1:{srv.server_address[1]}")
     encoded = body.encode()
-    conn.request("POST", path, body=encoded, headers={"Content-Length": str(len(encoded))})
+    conn.request("POST", path, body=encoded, headers={"Content-Length": str(len(encoded)), "Connection": "close"})
     resp = conn.getresponse()
     return resp.status, resp.read().decode()
 
@@ -101,6 +101,7 @@ def test_get_single_key_returns_raw_value(server):
         capture_output=True,
         text=True,
         timeout=60,
+        input=None,
     )
 
 
@@ -123,6 +124,7 @@ def test_get_keys_list_calls_list_command(server):
         capture_output=True,
         text=True,
         timeout=60,
+        input=None,
     )
 
 
@@ -160,10 +162,11 @@ def test_post_valid_key_and_value_stores_secret(server):
     assert status == 200
     assert "MY_TOKEN" in body
     mock_run.assert_called_once_with(
-        ["/usr/local/bin/keyguard", "set", "MY_TOKEN", "secret123"],
+        ["/usr/local/bin/keyguard", "set", "MY_TOKEN"],
         capture_output=True,
         text=True,
         timeout=60,
+        input="secret123",
     )
 
 
@@ -171,8 +174,8 @@ def test_post_strips_trailing_newline_from_body(server):
     with patch("subprocess.run", return_value=subprocess_result(0, stdout="Set 'TOKEN'")) as mock_run:
         http_post(server, "/TOKEN", body="value\n")
 
-    _, call_args = mock_run.call_args
-    assert mock_run.call_args[0][0] == ["/usr/local/bin/keyguard", "set", "TOKEN", "value"]
+    assert mock_run.call_args[0][0] == ["/usr/local/bin/keyguard", "set", "TOKEN"]
+    assert mock_run.call_args[1]["input"] == "value"
 
 
 def test_post_missing_path_returns_400(server):

@@ -4,7 +4,7 @@ from __future__ import annotations
 import ipaddress
 import subprocess
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
 from typing import Final
@@ -62,7 +62,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(400, b"Missing value in request body")
             return
 
-        self._run_keyguard(["set", path, value])
+        self._run_keyguard(["set", path], stdin_value=value)
 
     def do_GET(self) -> None:
         if not is_allowed(self.client_address[0]):
@@ -81,13 +81,14 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         keys = [k.strip() for k in path.split(",") if k.strip()]
         self._run_keyguard(["get"] + keys)
 
-    def _run_keyguard(self, cmd_args: list[str]) -> None:
+    def _run_keyguard(self, cmd_args: list[str], stdin_value: str | None = None) -> None:
         try:
             result = subprocess.run(
                 [str(KEYGUARD_BIN)] + cmd_args,
                 capture_output=True,
                 text=True,
                 timeout=SUBPROCESS_TIMEOUT,
+                input=stdin_value,
             )
         except subprocess.TimeoutExpired:
             self._respond(500, b"keyguard timed out")
@@ -111,7 +112,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = HTTPServer((HOST, PORT), KeyguardHandler)
+    server = ThreadingHTTPServer((HOST, PORT), KeyguardHandler)
     print(f"[keyguard] listening on {HOST}:{PORT}", file=sys.stderr, flush=True)
     server.serve_forever()
 
