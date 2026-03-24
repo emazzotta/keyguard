@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 KEYGUARD_BIN: Final = Path("/usr/local/bin/keyguard")
 HOST: Final = "0.0.0.0"
 PORT: Final = 7777
+SUBPROCESS_TIMEOUT: Final = 60
 
 ALLOWED_NETWORKS: Final = (
     IPv4Network("127.0.0.0/8"),       # loopback
@@ -40,8 +41,18 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(400, b"Invalid secret name")
             return
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        value = self.rfile.read(content_length).decode().strip()
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            self._respond(400, b"Invalid Content-Length")
+            return
+
+        try:
+            value = self.rfile.read(content_length).decode("utf-8").strip()
+        except UnicodeDecodeError:
+            self._respond(400, b"Request body must be valid UTF-8")
+            return
+
         if not value:
             self._respond(400, b"Missing value in request body")
             return
@@ -66,11 +77,16 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         self._run_keyguard(["get"] + keys)
 
     def _run_keyguard(self, cmd_args: list[str]) -> None:
-        result = subprocess.run(
-            [str(KEYGUARD_BIN)] + cmd_args,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [str(KEYGUARD_BIN)] + cmd_args,
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            self._respond(500, b"keyguard timed out")
+            return
 
         if result.returncode == 0:
             self._respond(200, result.stdout.encode(), "text/plain")
@@ -85,8 +101,8 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format: str, *args: object) -> None:
-        print(f"[keyguard] {self.address_string()} {format % args}", file=sys.stderr)
+    def log_message(self, fmt: str, *args: object) -> None:
+        print(f"[keyguard] {self.address_string()} {fmt % args}", file=sys.stderr)
 
 
 def main() -> None:
