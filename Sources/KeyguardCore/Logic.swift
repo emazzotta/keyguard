@@ -12,12 +12,11 @@ public func parseEnv(_ content: String) -> [String: String] {
         guard parts.count == 2 else { continue }
         let key = String(parts[0])
         var value = String(parts[1])
-        if let range = value.range(of: #"\s+#.*$"#, options: .regularExpression) {
-            value = String(value[value.startIndex..<range.lowerBound])
-        }
         if (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
            (value.hasPrefix("'") && value.hasSuffix("'")) {
             value = String(value.dropFirst().dropLast())
+        } else if let range = value.range(of: #"\s+#.*$"#, options: .regularExpression) {
+            value = String(value[value.startIndex..<range.lowerBound])
         }
         entries[key] = value
     }

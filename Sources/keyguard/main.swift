@@ -139,28 +139,26 @@ func readSecret() -> String? {
     return secret.isEmpty ? nil : secret
 }
 
-func setKey(name: String, value: String) {
-    let key: SymmetricKey
-    var entries: [String: String]
-
-    if FileManager.default.fileExists(atPath: SECRETS_FILE.path) {
-        authenticate(reason: "Update \(name)")
-        guard let existingKey = loadKey(),
-              let combined = try? Data(contentsOf: SECRETS_FILE),
-              let sealed = try? AES.GCM.SealedBox(combined: combined),
-              let decrypted = try? AES.GCM.open(sealed, using: existingKey),
-              let content = String(data: decrypted, encoding: .utf8) else {
-            fputs("Failed to read existing secrets\n", stderr)
-            exit(1)
-        }
-        key = existingKey
-        entries = parseEnv(content)
-    } else {
-        key = SymmetricKey(size: .bits256)
+func loadOrInitSecrets(reason: String) -> (SymmetricKey, [String: String]) {
+    guard FileManager.default.fileExists(atPath: SECRETS_FILE.path) else {
+        let key = SymmetricKey(size: .bits256)
         storeKey(key)
-        entries = [:]
+        return (key, [:])
     }
+    authenticate(reason: reason)
+    guard let existingKey = loadKey(),
+          let combined = try? Data(contentsOf: SECRETS_FILE),
+          let sealed = try? AES.GCM.SealedBox(combined: combined),
+          let decrypted = try? AES.GCM.open(sealed, using: existingKey),
+          let content = String(data: decrypted, encoding: .utf8) else {
+        fputs("Failed to read existing secrets\n", stderr)
+        exit(1)
+    }
+    return (existingKey, parseEnv(content))
+}
 
+func setKey(name: String, value: String) {
+    var (key, entries) = loadOrInitSecrets(reason: "Update \(name)")
     entries[name] = value
     encrypt(serializeEnv(entries), using: key)
     print("Set '\(name)'")
@@ -204,32 +202,12 @@ func importEnv(path: String) {
         exit(1)
     }
 
-    let key: SymmetricKey
-    var entries: [String: String]
-
-    if FileManager.default.fileExists(atPath: SECRETS_FILE.path) {
-        authenticate(reason: "Import \(url.lastPathComponent)")
-        guard let existingKey = loadKey(),
-              let combined = try? Data(contentsOf: SECRETS_FILE),
-              let sealed = try? AES.GCM.SealedBox(combined: combined),
-              let decrypted = try? AES.GCM.open(sealed, using: existingKey),
-              let content = String(data: decrypted, encoding: .utf8) else {
-            fputs("Failed to read existing secrets\n", stderr)
-            exit(1)
-        }
-        key = existingKey
-        entries = parseEnv(content)
-    } else {
-        key = SymmetricKey(size: .bits256)
-        storeKey(key)
-        entries = [:]
-    }
-
-    let incoming_entries = parseEnv(incoming)
-    entries.merge(incoming_entries) { _, new in new }
+    var (key, entries) = loadOrInitSecrets(reason: "Import \(url.lastPathComponent)")
+    let incomingEntries = parseEnv(incoming)
+    entries.merge(incomingEntries) { _, new in new }
     encrypt(serializeEnv(entries), using: key)
 
-    print("Imported \(incoming_entries.count) keys from \(url.lastPathComponent) → \(SECRETS_FILE.path)")
+    print("Imported \(incomingEntries.count) keys from \(url.lastPathComponent) → \(SECRETS_FILE.path)")
     print("You can now delete the plaintext file: rm \(url.path)")
 }
 

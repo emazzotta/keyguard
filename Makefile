@@ -42,6 +42,7 @@ bin/keyguard: Sources/keyguard/main.swift Sources/KeyguardCore/Logic.swift
 test: test-swift test-python ## Run all tests
 
 test-swift: ## Run Swift unit tests
+	mkdir -p bin
 	swiftc -parse-as-library Sources/KeyguardCore/Logic.swift Tests/KeyguardCoreTests/LogicTests.swift -o bin/test-logic && bin/test-logic
 
 test-python: ## Run Python tests

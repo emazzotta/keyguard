@@ -29,6 +29,8 @@ struct TestRunner {
         checkDict("double-quoted value",     parseEnv(#"KEY="hello world""#),        ["KEY": "hello world"])
         checkDict("single-quoted value",     parseEnv("KEY='hello world'"),          ["KEY": "hello world"])
         checkDict("inline comment stripped", parseEnv("KEY=value  # comment"),       ["KEY": "value"])
+        checkDict("hash inside double quotes kept", parseEnv(#"KEY="val # not a comment""#), ["KEY": "val # not a comment"])
+        checkDict("hash inside single quotes kept", parseEnv("KEY='val # not a comment'"),   ["KEY": "val # not a comment"])
         checkDict("comment line skipped",    parseEnv("# comment\nKEY=value"),       ["KEY": "value"])
         checkDict("empty lines skipped",     parseEnv("\n\nKEY=value\n\n"),          ["KEY": "value"])
         checkDict("equals sign in value",    parseEnv("KEY=a=b=c"),                  ["KEY": "a=b=c"])

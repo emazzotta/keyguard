@@ -1,5 +1,7 @@
 # keyguard
 
+[![Pipeline](https://github.com/emazzotta/keyguard/actions/workflows/pipeline.yml/badge.svg)](https://github.com/emazzotta/keyguard/actions/workflows/pipeline.yml)
+
 A lightweight, local secret manager for macOS. Encrypts secrets on disk with AES-256-GCM and gates every decryption behind Touch ID. Exposes secrets over a local HTTP server so Docker containers or local scripts can fetch them at runtime without credentials ever being baked into images or environment variables.
 
 ## How it works
@@ -126,6 +128,7 @@ Set this in your shell profile before running `make install` — the value is ba
 | Unauthenticated HTTP request | Touch ID required for every decryption; biometrics only (no password fallback) |
 | Request from another device on the network | Server rejects all IPs outside localhost and Docker subnets |
 | Inline `keyguard set KEY value` | Warning printed to stderr — use the interactive prompt instead |
+| `POST /<name>` from container | Value piped to `keyguard` via stdin — never appears in process args or `ps` |
 
 ### Encryption details
 
