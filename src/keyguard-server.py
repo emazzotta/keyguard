@@ -30,6 +30,24 @@ def is_allowed(client_ip: str) -> bool:
 
 
 class KeyguardHandler(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        if not is_allowed(self.client_address[0]):
+            self._respond(403, b"Forbidden")
+            return
+
+        path = urlparse(self.path).path.strip("/")
+        if not path or "," in path or path == "_keys":
+            self._respond(400, b"Invalid secret name")
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        value = self.rfile.read(content_length).decode().strip()
+        if not value:
+            self._respond(400, b"Missing value in request body")
+            return
+
+        self._run_keyguard(["set", path, value])
+
     def do_GET(self) -> None:
         if not is_allowed(self.client_address[0]):
             self._respond(403, b"Forbidden")

@@ -81,7 +81,16 @@ curl http://host.docker.internal:7777/MY_API_TOKEN,PASSWORD  # KEY=value lines
 curl http://host.docker.internal:7777/_keys                  # list all key names
 ```
 
-Every request triggers a Touch ID prompt on the host showing the exact key names being revealed. The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
+Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed.
+
+**Storing a secret from a container (POST):**
+```bash
+curl -s -X POST http://host.docker.internal:7777/MY_API_TOKEN -d 'the-value'
+```
+
+`POST /<name>` stores or updates a secret. The value is read from the request body. Triggers Touch ID on the host (`"Update MY_API_TOKEN"`). Responds with `Set 'MY_API_TOKEN'` on success.
+
+The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
 
 ## Custom secrets file path
 
