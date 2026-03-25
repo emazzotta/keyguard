@@ -83,7 +83,7 @@ curl http://host.docker.internal:7777/MY_API_TOKEN,PASSWORD  # KEY=value lines
 curl http://host.docker.internal:7777/_keys                  # list all key names
 ```
 
-Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. A macOS notification is displayed for every secret read, showing the key names and source IP with resolved names (reverse DNS hostname and/or Docker container name).
+Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. A macOS notification is displayed for every secret read, showing an ISO timestamp, key names, and source IP with resolved names (reverse DNS hostname and/or Docker container name). Clients can send an `X-Keyguard-Source` header (e.g., the container hostname) to identify themselves — the server resolves it to a container name via `docker inspect` when possible.
 
 Optionally, append `?timeout=N` to cache decrypted values in the server's process memory for up to `N` seconds (max 300), reducing repeated Touch ID prompts. Cache entries are scoped to the requesting IP — a different container cannot read another's cache unless explicitly allowed with `?share=all` or `?share=172.17.0.2,172.17.0.3`. Cached reads still trigger a notification marked `(cached)`, and the Touch ID prompt shows the duration for informed consent (`"Reveal TOKEN (cached for 60s)"`). By default there is no caching. Flush with `DELETE /_cache`.
 

@@ -132,7 +132,26 @@ def _resolve_container_name(ip: str) -> str | None:
     return None
 
 
-def _resolve_source(ip: str) -> str:
+def _resolve_container_by_hint(hint: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.Name}}", hint],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().lstrip("/")
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return None
+
+
+def _resolve_source(ip: str, source_hint: str | None = None) -> str:
+    if source_hint:
+        container_name = _resolve_container_by_hint(source_hint)
+        name = container_name or source_hint
+        if ip.startswith("127."):
+            return name
+        return f"{ip} ({name})"
     if ip.startswith("127."):
         return "localhost"
     names: list[str] = []
@@ -151,9 +170,10 @@ def _escape_osascript(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _send_notification(keys: list[str], client_ip: str, cached: bool) -> None:
+def _send_notification(keys: list[str], client_ip: str, cached: bool,
+                       source_hint: str | None = None) -> None:
     try:
-        source = _resolve_source(client_ip)
+        source = _resolve_source(client_ip, source_hint)
         cache_hint = " (cached)" if cached else ""
         key_list = ", ".join(keys)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -173,9 +193,11 @@ def _send_notification(keys: list[str], client_ip: str, cached: bool) -> None:
         print(f"[keyguard] notification error: {e}", file=sys.stderr)
 
 
-def _notify_async(keys: list[str], client_ip: str, cached: bool) -> None:
+def _notify_async(keys: list[str], client_ip: str, cached: bool,
+                  source_hint: str | None = None) -> None:
     thread = threading.Thread(
-        target=_send_notification, args=(keys, client_ip, cached), daemon=True,
+        target=_send_notification, args=(keys, client_ip, cached, source_hint),
+        daemon=True,
     )
     thread.start()
 
@@ -258,14 +280,16 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
         keys = [k.strip() for k in path.split(",") if k.strip()]
         client_ip = self.client_address[0]
+        source_hint = self.headers.get("X-Keyguard-Source")
         query = parse_qs(parsed.query)
         timeout = _parse_timeout(query)
 
         if timeout:
             share_ips = _parse_share(query, client_ip)
-            self._get_with_cache(keys, client_ip, timeout, share_ips)
+            self._get_with_cache(keys, client_ip, timeout, share_ips, source_hint)
         else:
-            self._run_keyguard(["get"] + keys, notify_keys=keys, client_ip=client_ip)
+            self._run_keyguard(["get"] + keys, notify_keys=keys, client_ip=client_ip,
+                               source_hint=source_hint)
 
     def do_DELETE(self) -> None:
         if not is_allowed(self.client_address[0]):
@@ -280,13 +304,13 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(400, b"Unknown endpoint")
 
     def _get_with_cache(self, keys: list[str], client_ip: str, timeout: int,
-                        share_ips: list[str]) -> None:
+                        share_ips: list[str], source_hint: str | None = None) -> None:
         cached_values = {k: _cache_get_shared(share_ips, k) for k in keys}
 
         if all(v is not None for v in cached_values.values()):
             body = _format_response(keys, cached_values)
             self._respond(200, body.encode(), "text/plain")
-            _notify_async(keys, client_ip, cached=True)
+            _notify_async(keys, client_ip, cached=True, source_hint=source_hint)
             return
 
         missing_keys = [k for k in keys if cached_values[k] is None]
@@ -303,7 +327,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
         body = _format_response(keys, all_values)
         self._respond(200, body.encode(), "text/plain")
-        _notify_async(keys, client_ip, cached=False)
+        _notify_async(keys, client_ip, cached=False, source_hint=source_hint)
 
     def _fetch_keys(self, keys: list[str], cache_duration: int) -> dict[str, str] | None:
         cmd = ["get"] + keys + ["--cache-duration", str(cache_duration)]
@@ -329,7 +353,8 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         return _parse_key_value_output(result.stdout)
 
     def _run_keyguard(self, cmd_args: list[str], stdin_value: str | None = None,
-                      notify_keys: list[str] | None = None, client_ip: str | None = None) -> None:
+                      notify_keys: list[str] | None = None, client_ip: str | None = None,
+                      source_hint: str | None = None) -> None:
         try:
             result = subprocess.run(
                 [str(KEYGUARD_BIN)] + cmd_args,
@@ -345,7 +370,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if result.returncode == 0:
             self._respond(200, result.stdout.encode(), "text/plain")
             if notify_keys and client_ip:
-                _notify_async(notify_keys, client_ip, cached=False)
+                _notify_async(notify_keys, client_ip, cached=False, source_hint=source_hint)
         elif result.returncode == 2:
             self._respond(403, b"Touch ID cancelled or failed")
         else:

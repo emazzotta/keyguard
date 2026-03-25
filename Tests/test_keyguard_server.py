@@ -30,6 +30,7 @@ _format_response = _module._format_response
 _resolve_source = _module._resolve_source
 _resolve_hostname = _module._resolve_hostname
 _resolve_container_name = _module._resolve_container_name
+_resolve_container_by_hint = _module._resolve_container_by_hint
 _escape_osascript = _module._escape_osascript
 
 
@@ -60,9 +61,12 @@ def clear_cache():
 # ---------------------------------------------------------------------------
 
 
-def http_get(srv: HTTPServer, path: str) -> tuple[int, str]:
+def http_get(srv: HTTPServer, path: str, extra_headers: dict[str, str] | None = None) -> tuple[int, str]:
     conn = http.client.HTTPConnection(f"127.0.0.1:{srv.server_address[1]}")
-    conn.request("GET", path, headers={"Connection": "close"})
+    headers = {"Connection": "close"}
+    if extra_headers:
+        headers.update(extra_headers)
+    conn.request("GET", path, headers=headers)
     resp = conn.getresponse()
     return resp.status, resp.read().decode()
 
@@ -529,6 +533,34 @@ def test_cached_get_sends_notification_with_cached_hint(server):
     assert "(cached)" in osascript_cmd[2]
 
 
+def test_get_with_source_header_includes_hint_in_notification(server):
+    inspect_result = MagicMock()
+    inspect_result.returncode = 0
+    inspect_result.stdout = "/my-container\n"
+
+    def side_effect(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if cmd[0] == "/usr/local/bin/keyguard":
+            return subprocess_result(0, stdout="secret123")
+        if cmd[0] == "docker":
+            return inspect_result
+        return subprocess_result(0)
+
+    with patch("subprocess.run", side_effect=side_effect) as mock_run:
+        status, _ = http_get(server, "/MY_TOKEN",
+                             extra_headers={"X-Keyguard-Source": "abc123"})
+
+    assert status == 200
+    time.sleep(0.3)
+
+    notification_calls = [
+        c for c in mock_run.call_args_list
+        if c[0][0][0] == "osascript"
+    ]
+    assert len(notification_calls) == 1
+    assert "my-container" in notification_calls[0][0][0][2]
+
+
 def test_list_does_not_send_notification(server):
     with patch("subprocess.run", return_value=subprocess_result(0, stdout="KEY1\nKEY2\n")) as mock_run:
         http_get(server, "/_keys")
@@ -652,6 +684,39 @@ def test_resolve_source_localhost():
 
 def test_resolve_source_localhost_other_loopback():
     assert _resolve_source("127.0.0.5") == "localhost"
+
+
+def test_resolve_source_with_hint_resolves_container():
+    inspect_result = MagicMock()
+    inspect_result.returncode = 0
+    inspect_result.stdout = "/my-app\n"
+
+    with patch("subprocess.run", return_value=inspect_result):
+        result = _resolve_source("127.0.0.1", source_hint="abc123")
+
+    assert result == "my-app"
+
+
+def test_resolve_source_with_hint_unresolvable_uses_raw_hint():
+    inspect_result = MagicMock()
+    inspect_result.returncode = 1
+    inspect_result.stdout = ""
+
+    with patch("subprocess.run", return_value=inspect_result):
+        result = _resolve_source("127.0.0.1", source_hint="my-hostname")
+
+    assert result == "my-hostname"
+
+
+def test_resolve_source_with_hint_non_localhost_includes_ip():
+    inspect_result = MagicMock()
+    inspect_result.returncode = 0
+    inspect_result.stdout = "/my-app\n"
+
+    with patch("subprocess.run", return_value=inspect_result):
+        result = _resolve_source("172.17.0.2", source_hint="abc123")
+
+    assert result == "172.17.0.2 (my-app)"
 
 
 def test_resolve_source_docker_ip_without_docker():
