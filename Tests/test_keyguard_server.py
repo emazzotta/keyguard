@@ -23,7 +23,9 @@ _cache_lock = _module._cache_lock
 _cache_clear = _module._cache_clear
 _cache_get = _module._cache_get
 _cache_put = _module._cache_put
+_cache_get_shared = _module._cache_get_shared
 _parse_timeout = _module._parse_timeout
+_parse_share = _module._parse_share
 _format_response = _module._format_response
 _resolve_source = _module._resolve_source
 _resolve_hostname = _module._resolve_hostname
@@ -435,7 +437,7 @@ def test_get_with_timeout_subprocess_timeout_returns_500(server):
 
 
 def test_get_partial_cache_fetches_only_missing_keys(server):
-    _cache_put("A", "1", 60)
+    _cache_put("127.0.0.1", "A", "1", 60)
 
     with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret2")) as mock_run:
         status, body = http_get(server, "/A,B?timeout=60")
@@ -451,19 +453,35 @@ def test_get_partial_cache_fetches_only_missing_keys(server):
     )
 
 
+def test_cache_from_different_ip_not_shared_by_default(server):
+    _cache_put("172.17.0.5", "TOKEN", "other-secret", 60)
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="my-secret")) as mock_run:
+        status, body = http_get(server, "/TOKEN?timeout=60")
+
+    assert status == 200
+    assert body == "my-secret"
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "TOKEN", "--cache-duration", "60"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
 # ---------------------------------------------------------------------------
 # DELETE /_cache
 # ---------------------------------------------------------------------------
 
 
 def test_delete_cache_clears_all(server):
-    _cache_put("TOKEN", "val", 60)
+    _cache_put("127.0.0.1", "TOKEN", "val", 60)
 
     status, body = http_delete(server, "/_cache")
 
     assert status == 200
     assert body == "Cache cleared"
-    assert _cache_get("TOKEN") is None
+    assert _cache_get("127.0.0.1", "TOKEN") is None
 
 
 def test_delete_unknown_endpoint_returns_400(server):
@@ -574,22 +592,58 @@ def test_format_response_multiple_keys():
 
 
 def test_cache_put_and_get():
-    _cache_put("K", "V", 10)
-    assert _cache_get("K") == "V"
+    _cache_put("10.0.0.1", "K", "V", 10)
+    assert _cache_get("10.0.0.1", "K") == "V"
+
+
+def test_cache_scoped_to_ip():
+    _cache_put("10.0.0.1", "K", "V", 10)
+    assert _cache_get("10.0.0.2", "K") is None
 
 
 def test_cache_expired_returns_none():
-    _cache_put("K", "V", 0)
+    _cache_put("10.0.0.1", "K", "V", 0)
     time.sleep(0.01)
-    assert _cache_get("K") is None
+    assert _cache_get("10.0.0.1", "K") is None
 
 
 def test_cache_clear_removes_all():
-    _cache_put("A", "1", 60)
-    _cache_put("B", "2", 60)
+    _cache_put("10.0.0.1", "A", "1", 60)
+    _cache_put("10.0.0.2", "B", "2", 60)
     _cache_clear()
-    assert _cache_get("A") is None
-    assert _cache_get("B") is None
+    assert _cache_get("10.0.0.1", "A") is None
+    assert _cache_get("10.0.0.2", "B") is None
+
+
+def test_cache_get_shared_with_all():
+    _cache_put("10.0.0.1", "K", "V", 10)
+    assert _cache_get_shared(["*"], "K") == "V"
+
+
+def test_cache_get_shared_with_specific_ip():
+    _cache_put("10.0.0.1", "K", "V", 10)
+    assert _cache_get_shared(["10.0.0.1", "10.0.0.2"], "K") == "V"
+    assert _cache_get_shared(["10.0.0.3"], "K") is None
+
+
+def test_parse_share_defaults_to_client_ip():
+    assert _parse_share({}, "10.0.0.1") == ["10.0.0.1"]
+
+
+def test_parse_share_all():
+    assert _parse_share({"share": ["all"]}, "10.0.0.1") == ["*"]
+
+
+def test_parse_share_explicit_ips_includes_client():
+    result = _parse_share({"share": ["10.0.0.2,10.0.0.3"]}, "10.0.0.1")
+    assert "10.0.0.1" in result
+    assert "10.0.0.2" in result
+    assert "10.0.0.3" in result
+
+
+def test_parse_share_does_not_duplicate_client():
+    result = _parse_share({"share": ["10.0.0.1,10.0.0.2"]}, "10.0.0.1")
+    assert result.count("10.0.0.1") == 1
 
 
 def test_resolve_source_localhost():

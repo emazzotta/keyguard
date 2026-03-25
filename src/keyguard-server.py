@@ -25,7 +25,7 @@ ALLOWED_NETWORKS: Final = (
     IPv4Network("192.168.65.0/24"),
 )
 
-_cache: dict[str, tuple[str, float]] = {}
+_cache: dict[tuple[str, str], tuple[str, float]] = {}
 _cache_lock = threading.Lock()
 
 
@@ -37,24 +37,56 @@ def is_allowed(client_ip: str) -> bool:
         return False
 
 
-def _cache_get(key: str) -> str | None:
+def _cache_key(ip: str, name: str) -> tuple[str, str]:
+    return (ip, name)
+
+
+def _cache_get(ip: str, key: str) -> str | None:
     with _cache_lock:
-        entry = _cache.get(key)
+        ck = _cache_key(ip, key)
+        entry = _cache.get(ck)
         if entry and entry[1] > time.monotonic():
             return entry[0]
         if entry:
-            del _cache[key]
+            del _cache[ck]
         return None
 
 
-def _cache_put(key: str, value: str, timeout: int) -> None:
+def _cache_put(ip: str, key: str, value: str, timeout: int) -> None:
     with _cache_lock:
-        _cache[key] = (value, time.monotonic() + timeout)
+        _cache[_cache_key(ip, key)] = (value, time.monotonic() + timeout)
 
 
 def _cache_clear() -> None:
     with _cache_lock:
         _cache.clear()
+
+
+def _parse_share(query: dict[str, list[str]], client_ip: str) -> list[str]:
+    share_values = query.get("share")
+    if not share_values:
+        return [client_ip]
+    raw = share_values[0].strip()
+    if raw == "all":
+        return ["*"]
+    ips = [s.strip() for s in raw.split(",") if s.strip()]
+    if client_ip not in ips:
+        ips.append(client_ip)
+    return ips
+
+
+def _cache_get_shared(lookup_ips: list[str], key: str) -> str | None:
+    if "*" in lookup_ips:
+        with _cache_lock:
+            for (ip, name), (value, expiry) in list(_cache.items()):
+                if name == key and expiry > time.monotonic():
+                    return value
+        return None
+    for ip in lookup_ips:
+        val = _cache_get(ip, key)
+        if val is not None:
+            return val
+    return None
 
 
 def _resolve_hostname(ip: str) -> str | None:
@@ -220,7 +252,8 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         timeout = _parse_timeout(query)
 
         if timeout:
-            self._get_with_cache(keys, client_ip, timeout)
+            share_ips = _parse_share(query, client_ip)
+            self._get_with_cache(keys, client_ip, timeout, share_ips)
         else:
             self._run_keyguard(["get"] + keys, notify_keys=keys, client_ip=client_ip)
 
@@ -236,8 +269,9 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         else:
             self._respond(400, b"Unknown endpoint")
 
-    def _get_with_cache(self, keys: list[str], client_ip: str, timeout: int) -> None:
-        cached_values = {k: _cache_get(k) for k in keys}
+    def _get_with_cache(self, keys: list[str], client_ip: str, timeout: int,
+                        share_ips: list[str]) -> None:
+        cached_values = {k: _cache_get_shared(share_ips, k) for k in keys}
 
         if all(v is not None for v in cached_values.values()):
             body = _format_response(keys, cached_values)
@@ -251,7 +285,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             return
 
         for k, v in fresh_values.items():
-            _cache_put(k, v, timeout)
+            _cache_put(client_ip, k, v, timeout)
 
         all_values = {}
         for k in keys:
