@@ -83,21 +83,9 @@ curl http://host.docker.internal:7777/MY_API_TOKEN,PASSWORD  # KEY=value lines
 curl http://host.docker.internal:7777/_keys                  # list all key names
 ```
 
-Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. A macOS notification is displayed for every secret read, showing the key names, source IP with resolved names in parentheses (reverse DNS hostname and/or Docker container name), and whether it was served from cache. Examples: `TOKEN read by 172.17.0.2 (my-container)`, `TOKEN read by 192.168.1.50 (macbook.local)`, `TOKEN read by 127.0.0.1 (localhost) (cached)`.
+Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. A macOS notification is displayed for every secret read, showing the key names and source IP with resolved names (reverse DNS hostname and/or Docker container name).
 
-**Caching with `?timeout=N` (skip repeated Touch ID prompts):**
-```bash
-curl http://host.docker.internal:7777/TOKEN?timeout=60
-curl http://host.docker.internal:7777/TOKEN,PASSWORD?timeout=30
-```
-
-After Touch ID succeeds, the decrypted values are cached in the server's memory for `N` seconds (max 300). Subsequent requests for the same keys within that window are served without Touch ID — but still trigger a macOS notification marked `(cached)`. The Touch ID prompt shows the cache duration for informed consent: `"Reveal TOKEN (cached for 60s)"`.
-
-- Default: no caching (omit `?timeout` for current behavior)
-- Max timeout: 300 seconds (values above are clamped)
-- Cache is in-memory only — lost on server restart
-- Only GET is cacheable — POST always requires Touch ID
-- Flush manually: `curl -X DELETE http://host.docker.internal:7777/_cache`
+Optionally, append `?timeout=N` to cache decrypted values in the server's process memory for up to `N` seconds (max 300), reducing repeated Touch ID prompts. Cached reads still trigger a notification marked `(cached)`, and the Touch ID prompt shows the duration for informed consent (`"Reveal TOKEN (cached for 60s)"`). By default there is no caching. Flush with `DELETE /_cache`.
 
 **Storing a secret from a container (POST):**
 ```bash
@@ -142,8 +130,8 @@ Set this in your shell profile before running `make install` — the value is ba
 | Docker container reads secrets directly | Containers have no access to the host Keychain or filesystem |
 | Process on host reads `secrets.enc` | AES-256-GCM encrypted — unreadable without the key |
 | Process on host reads the encryption key | macOS Keychain ACL — other apps are challenged with a system password prompt |
-| Unauthenticated HTTP request | Touch ID required for every decryption; biometrics only (no password fallback). When caching is used, a macOS notification is sent for every read (cached or not) |
-| Cached secret read without Touch ID | Cache is opt-in per-request (`?timeout=N`), capped at 300s, in-memory only, and every cached read triggers a visible macOS notification |
+| Unauthenticated HTTP request | Touch ID required for every decryption; biometrics only (no password fallback) |
+| Optional cached read without Touch ID | Opt-in per-request (`?timeout=N`), capped at 300s, in-memory only, every read still triggers a macOS notification |
 | Request from another device on the network | Server rejects all IPs outside localhost and Docker subnets |
 | Inline `keyguard set KEY value` | Warning printed to stderr — use the interactive prompt instead |
 | `POST /<name>` from container | Value piped to `keyguard` via stdin — never appears in process args or `ps` |
@@ -160,5 +148,5 @@ Set this in your shell profile before running `make install` — the value is ba
 
 - The encryption key in Keychain can be extracted with the macOS login password (no Touch ID required for that path)
 - Decrypted values are held in memory briefly and not explicitly zeroed
-- When `?timeout=N` is used, decrypted values remain in the server process memory for the specified duration
+- When the optional `?timeout=N` is used, decrypted values remain in the server process memory for the specified duration
 - All Docker containers on the machine have equal access to all secrets
