@@ -250,9 +250,24 @@ case "delete", "rm":
     deleteKey(name: args[2])
 
 case "get":
-    guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...]\n", stderr); exit(1) }
-    let keys = Array(args[2...])
-    let reason = "Reveal \(keys.joined(separator: ", "))"
+    guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }
+    var keys: [String] = []
+    var cacheDuration: Int? = nil
+    var i = 2
+    while i < args.count {
+        if args[i] == "--cache-duration", i + 1 < args.count, let duration = Int(args[i + 1]) {
+            cacheDuration = duration
+            i += 2
+        } else {
+            keys.append(args[i])
+            i += 1
+        }
+    }
+    guard !keys.isEmpty else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }
+    var reason = "Reveal \(keys.joined(separator: ", "))"
+    if let duration = cacheDuration {
+        reason += " (cached for \(duration)s)"
+    }
     let env = parseEnv(decrypt(reason: reason))
     let missing = keys.filter { env[$0] == nil }
     if !missing.isEmpty {

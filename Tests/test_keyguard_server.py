@@ -2,9 +2,10 @@ import http.client
 import importlib.util
 import subprocess
 import threading
+import time
 from http.server import HTTPServer, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -17,6 +18,17 @@ _spec.loader.exec_module(_module)
 
 is_allowed = _module.is_allowed
 KeyguardHandler = _module.KeyguardHandler
+_cache = _module._cache
+_cache_lock = _module._cache_lock
+_cache_clear = _module._cache_clear
+_cache_get = _module._cache_get
+_cache_put = _module._cache_put
+_parse_timeout = _module._parse_timeout
+_format_response = _module._format_response
+_resolve_source = _module._resolve_source
+_resolve_hostname = _module._resolve_hostname
+_resolve_container_name = _module._resolve_container_name
+_escape_osascript = _module._escape_osascript
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +44,13 @@ def server():
     thread.start()
     yield srv
     srv.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    _cache_clear()
+    yield
+    _cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +69,13 @@ def http_post(srv: HTTPServer, path: str, body: str = "") -> tuple[int, str]:
     conn = http.client.HTTPConnection(f"127.0.0.1:{srv.server_address[1]}")
     encoded = body.encode()
     conn.request("POST", path, body=encoded, headers={"Content-Length": str(len(encoded)), "Connection": "close"})
+    resp = conn.getresponse()
+    return resp.status, resp.read().decode()
+
+
+def http_delete(srv: HTTPServer, path: str) -> tuple[int, str]:
+    conn = http.client.HTTPConnection(f"127.0.0.1:{srv.server_address[1]}")
+    conn.request("DELETE", path, headers={"Connection": "close"})
     resp = conn.getresponse()
     return resp.status, resp.read().decode()
 
@@ -96,7 +122,7 @@ def test_get_single_key_returns_raw_value(server):
 
     assert status == 200
     assert body == "secret123"
-    mock_run.assert_called_once_with(
+    mock_run.assert_any_call(
         ["/usr/local/bin/keyguard", "get", "MY_TOKEN"],
         capture_output=True,
         text=True,
@@ -254,3 +280,398 @@ def test_get_subprocess_timeout_returns_500(server):
         status, _ = http_get(server, "/MY_TOKEN")
 
     assert status == 500
+
+
+# ---------------------------------------------------------------------------
+# GET with ?timeout — caching
+# ---------------------------------------------------------------------------
+
+
+def test_get_with_timeout_passes_cache_duration_to_keyguard(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")) as mock_run:
+        status, body = http_get(server, "/MY_TOKEN?timeout=30")
+
+    assert status == 200
+    assert body == "secret123"
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "MY_TOKEN", "--cache-duration", "30"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_get_with_timeout_serves_from_cache_on_second_request(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")):
+        status1, body1 = http_get(server, "/MY_TOKEN?timeout=30")
+
+    with patch("subprocess.run") as mock_run:
+        status2, body2 = http_get(server, "/MY_TOKEN?timeout=30")
+
+    assert status1 == 200
+    assert body1 == "secret123"
+    assert status2 == 200
+    assert body2 == "secret123"
+    time.sleep(0.2)
+    keyguard_calls = [
+        c for c in mock_run.call_args_list
+        if c[0][0][0] == "/usr/local/bin/keyguard"
+    ]
+    assert len(keyguard_calls) == 0
+
+
+def test_get_without_timeout_does_not_cache(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")):
+        http_get(server, "/MY_TOKEN")
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")) as mock_run:
+        http_get(server, "/MY_TOKEN")
+
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "MY_TOKEN"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        input=None,
+    )
+
+
+def test_get_with_timeout_caps_at_max(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")) as mock_run:
+        http_get(server, "/MY_TOKEN?timeout=9999")
+
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "MY_TOKEN", "--cache-duration", "300"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_get_with_timeout_zero_does_not_cache(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")):
+        http_get(server, "/MY_TOKEN?timeout=0")
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")) as mock_run:
+        http_get(server, "/MY_TOKEN?timeout=0")
+
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "MY_TOKEN"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        input=None,
+    )
+
+
+def test_get_with_negative_timeout_does_not_cache(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="val")) as mock_run:
+        http_get(server, "/MY_TOKEN?timeout=-5")
+
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "MY_TOKEN"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        input=None,
+    )
+
+
+def test_get_with_invalid_timeout_does_not_cache(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="val")) as mock_run:
+        http_get(server, "/MY_TOKEN?timeout=abc")
+
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "MY_TOKEN"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        input=None,
+    )
+
+
+def test_get_multi_key_with_timeout_caches_individually(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="A=1\nB=2\n")):
+        status1, body1 = http_get(server, "/A,B?timeout=60")
+
+    assert status1 == 200
+    assert "A=1" in body1
+    assert "B=2" in body1
+
+    with patch("subprocess.run") as mock_run:
+        status2, body2 = http_get(server, "/A?timeout=60")
+
+    assert status2 == 200
+    assert body2 == "1"
+    time.sleep(0.2)
+    keyguard_calls = [
+        c for c in mock_run.call_args_list
+        if c[0][0][0] == "/usr/local/bin/keyguard"
+    ]
+    assert len(keyguard_calls) == 0
+
+
+def test_get_with_timeout_touch_id_cancelled_returns_403(server):
+    with patch("subprocess.run", return_value=subprocess_result(2)):
+        status, body = http_get(server, "/MY_TOKEN?timeout=30")
+
+    assert status == 403
+    assert "Touch ID" in body
+
+
+def test_get_with_timeout_keyguard_error_returns_500(server):
+    with patch("subprocess.run", return_value=subprocess_result(1, stderr="decrypt failed")):
+        status, body = http_get(server, "/MY_TOKEN?timeout=30")
+
+    assert status == 500
+    assert "decrypt failed" in body
+
+
+def test_get_with_timeout_subprocess_timeout_returns_500(server):
+    with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="keyguard", timeout=60)):
+        status, _ = http_get(server, "/MY_TOKEN?timeout=30")
+
+    assert status == 500
+
+
+def test_get_partial_cache_fetches_only_missing_keys(server):
+    _cache_put("A", "1", 60)
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret2")) as mock_run:
+        status, body = http_get(server, "/A,B?timeout=60")
+
+    assert status == 200
+    assert "A=1" in body
+    assert "B=secret2" in body
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "B", "--cache-duration", "60"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DELETE /_cache
+# ---------------------------------------------------------------------------
+
+
+def test_delete_cache_clears_all(server):
+    _cache_put("TOKEN", "val", 60)
+
+    status, body = http_delete(server, "/_cache")
+
+    assert status == 200
+    assert body == "Cache cleared"
+    assert _cache_get("TOKEN") is None
+
+
+def test_delete_unknown_endpoint_returns_400(server):
+    status, body = http_delete(server, "/unknown")
+
+    assert status == 400
+
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+
+def test_get_sends_notification_async(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")) as mock_run:
+        status, _ = http_get(server, "/MY_TOKEN")
+
+    assert status == 200
+    time.sleep(0.2)
+
+    notification_calls = [
+        c for c in mock_run.call_args_list
+        if c[0][0][0] == "osascript"
+    ]
+    assert len(notification_calls) == 1
+    osascript_cmd = notification_calls[0][0][0]
+    assert "MY_TOKEN" in osascript_cmd[2]
+    assert "keyguard" in osascript_cmd[2]
+
+
+def test_cached_get_sends_notification_with_cached_hint(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret123")):
+        http_get(server, "/MY_TOKEN?timeout=60")
+
+    with patch("subprocess.run") as mock_run:
+        http_get(server, "/MY_TOKEN?timeout=60")
+
+    time.sleep(0.2)
+    notification_calls = [
+        c for c in mock_run.call_args_list
+        if len(c[0]) > 0 and isinstance(c[0][0], list) and len(c[0][0]) > 0 and c[0][0][0] == "osascript"
+    ]
+    assert len(notification_calls) == 1
+    osascript_cmd = notification_calls[0][0][0]
+    assert "(cached)" in osascript_cmd[2]
+
+
+def test_list_does_not_send_notification(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="KEY1\nKEY2\n")) as mock_run:
+        http_get(server, "/_keys")
+
+    time.sleep(0.2)
+    notification_calls = [
+        c for c in mock_run.call_args_list
+        if len(c[0]) > 0 and isinstance(c[0][0], list) and len(c[0][0]) > 0 and c[0][0][0] == "osascript"
+    ]
+    assert len(notification_calls) == 0
+
+
+def test_post_does_not_send_notification(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="Set 'TOKEN'")) as mock_run:
+        http_post(server, "/TOKEN", body="value")
+
+    time.sleep(0.2)
+    notification_calls = [
+        c for c in mock_run.call_args_list
+        if len(c[0]) > 0 and isinstance(c[0][0], list) and len(c[0][0]) > 0 and c[0][0][0] == "osascript"
+    ]
+    assert len(notification_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Unit tests — helper functions
+# ---------------------------------------------------------------------------
+
+
+def test_parse_timeout_valid():
+    assert _parse_timeout({"timeout": ["30"]}) == 30
+
+
+def test_parse_timeout_caps_at_max():
+    assert _parse_timeout({"timeout": ["9999"]}) == 300
+
+
+def test_parse_timeout_zero_returns_none():
+    assert _parse_timeout({"timeout": ["0"]}) is None
+
+
+def test_parse_timeout_negative_returns_none():
+    assert _parse_timeout({"timeout": ["-1"]}) is None
+
+
+def test_parse_timeout_missing_returns_none():
+    assert _parse_timeout({}) is None
+
+
+def test_parse_timeout_invalid_returns_none():
+    assert _parse_timeout({"timeout": ["abc"]}) is None
+
+
+def test_format_response_single_key():
+    assert _format_response(["TOKEN"], {"TOKEN": "secret"}) == "secret"
+
+
+def test_format_response_multiple_keys():
+    result = _format_response(["A", "B"], {"A": "1", "B": "2"})
+    assert result == "A=1\nB=2\n"
+
+
+def test_cache_put_and_get():
+    _cache_put("K", "V", 10)
+    assert _cache_get("K") == "V"
+
+
+def test_cache_expired_returns_none():
+    _cache_put("K", "V", 0)
+    time.sleep(0.01)
+    assert _cache_get("K") is None
+
+
+def test_cache_clear_removes_all():
+    _cache_put("A", "1", 60)
+    _cache_put("B", "2", 60)
+    _cache_clear()
+    assert _cache_get("A") is None
+    assert _cache_get("B") is None
+
+
+def test_resolve_source_localhost():
+    assert _resolve_source("127.0.0.1") == "127.0.0.1 (localhost)"
+
+
+def test_resolve_source_docker_ip_without_docker():
+    with patch("subprocess.run", side_effect=FileNotFoundError), \
+         patch("socket.gethostbyaddr", side_effect=OSError):
+        result = _resolve_source("172.17.0.2")
+    assert result == "172.17.0.2"
+
+
+def test_resolve_source_docker_ip_with_match():
+    docker_ps = MagicMock()
+    docker_ps.returncode = 0
+    docker_ps.stdout = "abc123\n"
+
+    docker_inspect = MagicMock()
+    docker_inspect.returncode = 0
+    docker_inspect.stdout = "/my-container 172.17.0.2 \n"
+
+    with patch("subprocess.run", side_effect=[docker_ps, docker_inspect]), \
+         patch("socket.gethostbyaddr", side_effect=OSError):
+        result = _resolve_source("172.17.0.2")
+
+    assert result == "172.17.0.2 (my-container)"
+
+
+def test_resolve_source_with_hostname_only():
+    with patch("socket.gethostbyaddr", return_value=("macbook.local", [], [])), \
+         patch("subprocess.run", side_effect=FileNotFoundError):
+        result = _resolve_source("192.168.1.50")
+
+    assert result == "192.168.1.50 (macbook.local)"
+
+
+def test_resolve_source_with_hostname_and_container():
+    docker_ps = MagicMock()
+    docker_ps.returncode = 0
+    docker_ps.stdout = "abc123\n"
+
+    docker_inspect = MagicMock()
+    docker_inspect.returncode = 0
+    docker_inspect.stdout = "/my-app 172.17.0.2 \n"
+
+    with patch("socket.gethostbyaddr", return_value=("some-host", [], [])), \
+         patch("subprocess.run", side_effect=[docker_ps, docker_inspect]):
+        result = _resolve_source("172.17.0.2")
+
+    assert result == "172.17.0.2 (some-host, my-app)"
+
+
+def test_resolve_source_deduplicates_hostname_and_container():
+    docker_ps = MagicMock()
+    docker_ps.returncode = 0
+    docker_ps.stdout = "abc123\n"
+
+    docker_inspect = MagicMock()
+    docker_inspect.returncode = 0
+    docker_inspect.stdout = "/my-app 172.17.0.2 \n"
+
+    with patch("socket.gethostbyaddr", return_value=("my-app", [], [])), \
+         patch("subprocess.run", side_effect=[docker_ps, docker_inspect]):
+        result = _resolve_source("172.17.0.2")
+
+    assert result == "172.17.0.2 (my-app)"
+
+
+def test_resolve_hostname_returns_none_on_failure():
+    with patch("socket.gethostbyaddr", side_effect=OSError):
+        assert _resolve_hostname("10.0.0.5") is None
+
+
+def test_resolve_hostname_ignores_ip_echo():
+    with patch("socket.gethostbyaddr", return_value=("10.0.0.5", [], [])):
+        assert _resolve_hostname("10.0.0.5") is None
+
+
+def test_escape_osascript_handles_quotes():
+    assert _escape_osascript('key "test"') == 'key \\"test\\"'
+
+
+def test_escape_osascript_handles_backslash():
+    assert _escape_osascript("path\\file") == "path\\\\file"
