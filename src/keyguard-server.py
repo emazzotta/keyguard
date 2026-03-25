@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
@@ -132,6 +133,8 @@ def _resolve_container_name(ip: str) -> str | None:
 
 
 def _resolve_source(ip: str) -> str:
+    if ip.startswith("127."):
+        return "localhost"
     names: list[str] = []
     hostname = _resolve_hostname(ip)
     if hostname:
@@ -153,7 +156,8 @@ def _send_notification(keys: list[str], client_ip: str, cached: bool) -> None:
         source = _resolve_source(client_ip)
         cache_hint = " (cached)" if cached else ""
         key_list = ", ".join(keys)
-        message = _escape_osascript(f"{key_list} read by {source}{cache_hint}")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        message = _escape_osascript(f"{timestamp} — {key_list} read by {source}{cache_hint}")
         result = subprocess.run(
             ["osascript", "-e",
              f'display notification "{message}" with title "keyguard"'],

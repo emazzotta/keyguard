@@ -647,7 +647,11 @@ def test_parse_share_does_not_duplicate_client():
 
 
 def test_resolve_source_localhost():
-    assert _resolve_source("127.0.0.1") == "127.0.0.1 (localhost)"
+    assert _resolve_source("127.0.0.1") == "localhost"
+
+
+def test_resolve_source_localhost_other_loopback():
+    assert _resolve_source("127.0.0.5") == "localhost"
 
 
 def test_resolve_source_docker_ip_without_docker():
