@@ -149,18 +149,24 @@ def _escape_osascript(s: str) -> str:
 
 
 def _send_notification(keys: list[str], client_ip: str, cached: bool) -> None:
-    source = _resolve_source(client_ip)
-    cache_hint = " (cached)" if cached else ""
-    key_list = ", ".join(keys)
-    message = _escape_osascript(f"{key_list} read by {source}{cache_hint}")
     try:
-        subprocess.run(
+        source = _resolve_source(client_ip)
+        cache_hint = " (cached)" if cached else ""
+        key_list = ", ".join(keys)
+        message = _escape_osascript(f"{key_list} read by {source}{cache_hint}")
+        result = subprocess.run(
             ["osascript", "-e",
              f'display notification "{message}" with title "keyguard"'],
-            capture_output=True, timeout=5,
+            capture_output=True, text=True, timeout=5,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
+        if result.returncode != 0:
+            print(f"[keyguard] notification failed (rc={result.returncode}): {result.stderr.strip()}", file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print("[keyguard] notification timed out", file=sys.stderr)
+    except FileNotFoundError:
+        print("[keyguard] osascript not found", file=sys.stderr)
+    except Exception as e:
+        print(f"[keyguard] notification error: {e}", file=sys.stderr)
 
 
 def _notify_async(keys: list[str], client_ip: str, cached: bool) -> None:
