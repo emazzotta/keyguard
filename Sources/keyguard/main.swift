@@ -87,11 +87,16 @@ func decrypt(reason: String) -> String {
         exit(1)
     }
 
-    guard let key = loadKey(),
-          let sealed = try? AES.GCM.SealedBox(combined: combined),
+    guard let key = loadKey() else {
+        fputs("No encryption key found in Keychain. Was it deleted or created on another machine?\n", stderr)
+        fputs("If starting fresh, run 'keyguard clear' first, then re-import your secrets.\n", stderr)
+        exit(1)
+    }
+
+    guard let sealed = try? AES.GCM.SealedBox(combined: combined),
           let decrypted = try? AES.GCM.open(sealed, using: key),
           let content = String(data: decrypted, encoding: .utf8) else {
-        fputs("Decryption failed\n", stderr)
+        fputs("Decryption failed - secrets file may be corrupted or encrypted with a different key\n", stderr)
         exit(1)
     }
 
@@ -152,12 +157,16 @@ func loadOrInitSecrets(reason: String) -> (SymmetricKey, [String: String]) {
         return (key, [:])
     }
     authenticate(reason: reason)
-    guard let existingKey = loadKey(),
-          let combined = try? Data(contentsOf: SECRETS_FILE),
+    guard let existingKey = loadKey() else {
+        fputs("No encryption key found in Keychain. Secrets file exists at \(SECRETS_FILE.path) but cannot be decrypted.\n", stderr)
+        fputs("If starting fresh, run 'keyguard clear' first, then re-import your secrets.\n", stderr)
+        exit(1)
+    }
+    guard let combined = try? Data(contentsOf: SECRETS_FILE),
           let sealed = try? AES.GCM.SealedBox(combined: combined),
           let decrypted = try? AES.GCM.open(sealed, using: existingKey),
           let content = String(data: decrypted, encoding: .utf8) else {
-        fputs("Failed to read existing secrets\n", stderr)
+        fputs("Failed to read existing secrets - file may be corrupted or encrypted with a different key\n", stderr)
         exit(1)
     }
     return (existingKey, parseEnv(content))
