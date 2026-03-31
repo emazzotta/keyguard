@@ -208,7 +208,13 @@ func clearSecrets() {
     print("Cleared all secrets")
 }
 
-func importEnv(path: String) {
+func promptConflictResolution(_ name: String) -> Bool {
+    fputs("  \(name) already exists. Overwrite? [y/N] ", stderr)
+    guard let answer = readLine(strippingNewline: true) else { return false }
+    return answer.lowercased() == "y"
+}
+
+func importEnv(path: String, forceOverwrite: Bool) {
     let url = URL(fileURLWithPath: path)
     guard let incoming = try? String(contentsOf: url, encoding: .utf8) else {
         fputs("Cannot read file: \(path)\n", stderr)
@@ -217,10 +223,40 @@ func importEnv(path: String) {
 
     var (key, entries) = loadOrInitSecrets(reason: "Import \(url.lastPathComponent)")
     let incomingEntries = parseEnv(incoming)
-    entries.merge(incomingEntries) { _, new in new }
+    let interactive = isatty(STDIN_FILENO) != 0
+
+    var added = 0
+    var overwritten = 0
+    var skipped = 0
+
+    for (name, value) in incomingEntries.sorted(by: { $0.key < $1.key }) {
+        if entries[name] != nil {
+            if forceOverwrite {
+                entries[name] = value
+                overwritten += 1
+            } else if interactive {
+                if promptConflictResolution(name) {
+                    entries[name] = value
+                    overwritten += 1
+                } else {
+                    skipped += 1
+                }
+            } else {
+                fputs("  Skipped \(name) (already exists, use --force to overwrite)\n", stderr)
+                skipped += 1
+            }
+        } else {
+            entries[name] = value
+            added += 1
+        }
+    }
+
     encrypt(serializeEnv(entries), using: key)
 
-    print("Imported \(incomingEntries.count) keys from \(url.lastPathComponent) → \(SECRETS_FILE.path)")
+    var summary = "Imported from \(url.lastPathComponent): \(added) added"
+    if overwritten > 0 { summary += ", \(overwritten) overwritten" }
+    if skipped > 0 { summary += ", \(skipped) skipped" }
+    print(summary)
     print("You can now delete the plaintext file: rm \(url.path)")
 }
 
@@ -260,8 +296,10 @@ case "clear":
     clearSecrets()
 
 case "import":
-    guard args.count == 3 else { fputs("Usage: keyguard import <path-to-.env>\n", stderr); exit(1) }
-    importEnv(path: args[2])
+    guard args.count >= 3 else { fputs("Usage: keyguard import <path-to-.env> [--force]\n", stderr); exit(1) }
+    let forceOverwrite = args.contains("--force")
+    let importPath = args[2]
+    importEnv(path: importPath, forceOverwrite: forceOverwrite)
 
 case "set":
     guard args.count >= 3 else { fputs("Usage: keyguard set <KEY> [value]\n", stderr); exit(1) }

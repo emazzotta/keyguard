@@ -38,9 +38,12 @@ This compiles the Swift binary, installs everything to `/usr/local`, and registe
 
 **Import from an existing `.env` file (additive — merges with existing secrets):**
 ```bash
-keyguard import path/to/.env
-rm path/to/.env  # delete the plaintext source
+keyguard import path/to/.env           # prompts for each conflicting key
+keyguard import path/to/.env --force   # overwrites all conflicts without asking
+rm path/to/.env                        # delete the plaintext source
 ```
+
+When a key already exists, the interactive prompt asks whether to overwrite or keep the original. In non-interactive mode (piped input), conflicts are skipped by default - use `--force` to overwrite.
 
 Supported `.env` formats:
 ```bash
