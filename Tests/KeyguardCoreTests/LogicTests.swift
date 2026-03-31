@@ -55,6 +55,33 @@ struct TestRunner {
         checkDict("round-trip single",     parseEnv(serializeEnv(["X": "y"])),    ["X": "y"])
         checkDict("round-trip empty",      parseEnv(serializeEnv([:])),            [:])
 
+        func checkArgs(_ desc: String, _ actual: ParsedArgs, positional: [String], cacheDuration: Int?) {
+            let posOk = actual.positional == positional
+            let cacheOk = actual.cacheDuration == cacheDuration
+            if posOk && cacheOk {
+                print("  ✓ \(desc)")
+            } else {
+                print("  ✗ \(desc): got positional=\(actual.positional) cache=\(String(describing: actual.cacheDuration)), want positional=\(positional) cache=\(String(describing: cacheDuration))")
+                failures += 1
+            }
+        }
+
+        print("\nparseArgs")
+        checkArgs("no args",                    parseArgs([]),                              positional: [],              cacheDuration: nil)
+        checkArgs("positional only",            parseArgs(["KEY1", "KEY2"]),                positional: ["KEY1", "KEY2"], cacheDuration: nil)
+        checkArgs("cache-duration at end",      parseArgs(["KEY", "--cache-duration", "60"]), positional: ["KEY"],       cacheDuration: 60)
+        checkArgs("cache-duration at start",    parseArgs(["--cache-duration", "120", "KEY"]), positional: ["KEY"],      cacheDuration: 120)
+        checkArgs("cache-duration between keys", parseArgs(["A", "--cache-duration", "30", "B"]), positional: ["A", "B"], cacheDuration: 30)
+        checkArgs("invalid duration kept as positional", parseArgs(["--cache-duration", "abc"]), positional: ["--cache-duration", "abc"], cacheDuration: nil)
+        checkArgs("missing duration value",     parseArgs(["--cache-duration"]),            positional: ["--cache-duration"], cacheDuration: nil)
+        checkArgs("zero duration",              parseArgs(["--cache-duration", "0"]),       positional: [],              cacheDuration: 0)
+        checkArgs("negative duration",          parseArgs(["--cache-duration", "-5"]),      positional: [],              cacheDuration: -5)
+
+        print("\nbuildReason")
+        checkStr("without cache",  buildReason(base: "List secrets", cacheDuration: nil),  "List secrets")
+        checkStr("with cache",     buildReason(base: "List secrets", cacheDuration: 120),  "List secrets (cached for 120s)")
+        checkStr("with zero",      buildReason(base: "Reveal TOKEN", cacheDuration: 0),    "Reveal TOKEN (cached for 0s)")
+
         if failures > 0 {
             fputs("\n\(failures) failure(s)\n", stderr)
             exit(1)

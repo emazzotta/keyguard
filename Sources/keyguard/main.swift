@@ -285,13 +285,50 @@ func importKey(base64: String) {
     print("Encryption key imported into Keychain")
 }
 
+func printUsage() {
+    let text = """
+    keyguard - local secret manager with Touch ID authentication
+
+    Usage: keyguard <command> [options]
+
+    Commands:
+      get <KEY> [KEY...]           Retrieve one or more secrets
+          [--cache-duration N]       Cache the decryption for N seconds
+      set <KEY> [VALUE]            Store a secret (prompts for value if omitted)
+      delete <KEY>                 Remove a secret (alias: rm)
+      list [--cache-duration N]    List all secret names
+      import <path> [--force]      Import secrets from a .env file
+                                     --force overwrites existing keys without prompting
+      export                       Print all secrets in KEY=VALUE format
+      import-key [BASE64]          Import an encryption key into Keychain
+                                     (prompts for key if omitted)
+      export-key                   Print the encryption key as base64
+      clear                        Delete all secrets and the encryption key
+      help                         Show this help message
+
+    Environment:
+      KEYGUARD_SECRETS_FILE        Override default secrets path (~/.keyguard/secrets.enc)
+
+    Examples:
+      keyguard set API_TOKEN
+      keyguard get API_TOKEN
+      keyguard get TOKEN_A TOKEN_B --cache-duration 120
+      keyguard import ~/secrets.env --force
+      keyguard delete OLD_KEY
+    """
+    fputs(text + "\n", stderr)
+}
+
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    fputs("Usage: keyguard <clear|import|import-key|export-key|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    printUsage()
     exit(1)
 }
 
 switch args[1] {
+case "help", "--help", "-h":
+    printUsage()
+
 case "clear":
     clearSecrets()
 
@@ -327,23 +364,10 @@ case "delete", "rm":
 
 case "get":
     guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }
-    var keys: [String] = []
-    var cacheDuration: Int? = nil
-    var i = 2
-    while i < args.count {
-        if args[i] == "--cache-duration", i + 1 < args.count, let duration = Int(args[i + 1]) {
-            cacheDuration = duration
-            i += 2
-        } else {
-            keys.append(args[i])
-            i += 1
-        }
-    }
+    let parsed = parseArgs(Array(args[2...]))
+    let keys = parsed.positional
     guard !keys.isEmpty else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }
-    var reason = "Reveal \(keys.joined(separator: ", "))"
-    if let duration = cacheDuration {
-        reason += " (cached for \(duration)s)"
-    }
+    let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))", cacheDuration: parsed.cacheDuration)
     let env = parseEnv(decrypt(reason: reason))
     let missing = keys.filter { env[$0] == nil }
     if !missing.isEmpty {
@@ -357,7 +381,9 @@ case "get":
     }
 
 case "list":
-    parseEnv(decrypt(reason: "List secrets")).keys.sorted().forEach { print($0) }
+    let listParsed = parseArgs(Array(args[2...]))
+    let listReason = buildReason(base: "List secrets", cacheDuration: listParsed.cacheDuration)
+    parseEnv(decrypt(reason: listReason)).keys.sorted().forEach { print($0) }
 
 case "export":
     print(decrypt(reason: "Export all secrets"), terminator: "")
@@ -384,6 +410,7 @@ case "import-key":
     importKey(base64: base64)
 
 default:
-    fputs("Unknown command '\(args[1])'\nUsage: keyguard <clear|import|import-key|export-key|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    fputs("Unknown command '\(args[1])'\n\n", stderr)
+    printUsage()
     exit(1)
 }
