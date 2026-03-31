@@ -182,6 +182,14 @@ def test_get_keyguard_error_returns_500(server):
     assert "key not found" in body
 
 
+def test_get_missing_encryption_key_returns_500_with_clear_message(server):
+    with patch("subprocess.run", return_value=subprocess_result(1, stderr="No encryption key found in Keychain")):
+        status, body = http_get(server, "/MY_TOKEN")
+
+    assert status == 500
+    assert "encryption key" in body
+
+
 # ---------------------------------------------------------------------------
 # POST — store secret
 # ---------------------------------------------------------------------------
@@ -254,6 +262,14 @@ def test_post_keyguard_error_returns_500(server):
 
     assert status == 500
     assert "encryption failed" in body
+
+
+def test_post_missing_encryption_key_returns_500_with_clear_message(server):
+    with patch("subprocess.run", return_value=subprocess_result(1, stderr="No encryption key found in Keychain")):
+        status, body = http_post(server, "/MY_TOKEN", body="value")
+
+    assert status == 500
+    assert "encryption key" in body
 
 
 def test_post_oversized_body_returns_400(server):

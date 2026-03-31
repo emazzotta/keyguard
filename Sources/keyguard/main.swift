@@ -79,7 +79,7 @@ func loadKey() -> SymmetricKey? {
     return SymmetricKey(data: keyData)
 }
 
-func decrypt(reason: String) -> String {
+func decryptWithKey(reason: String) -> (SymmetricKey, String) {
     authenticate(reason: reason)
 
     guard let combined = try? Data(contentsOf: SECRETS_FILE) else {
@@ -100,7 +100,11 @@ func decrypt(reason: String) -> String {
         exit(1)
     }
 
-    return content
+    return (key, content)
+}
+
+func decrypt(reason: String) -> String {
+    decryptWithKey(reason: reason).1
 }
 
 func encrypt(_ content: String, using key: SymmetricKey) {
@@ -172,26 +176,20 @@ func loadOrInitSecrets(reason: String) -> (SymmetricKey, [String: String]) {
     return (existingKey, parseEnv(content))
 }
 
-func setKey(name: String, value: String) {
+func setSecret(name: String, value: String) {
     var (key, entries) = loadOrInitSecrets(reason: "Update \(name)")
     entries[name] = value
     encrypt(serializeEnv(entries), using: key)
     print("Set '\(name)'")
 }
 
-func deleteKey(name: String) {
-    let content = decrypt(reason: "Delete \(name)")
-    guard let key = loadKey() else {
-        fputs("No encryption key found\n", stderr)
-        exit(1)
-    }
-
+func deleteSecret(name: String) {
+    let (key, content) = decryptWithKey(reason: "Delete \(name)")
     var entries = parseEnv(content)
     guard entries[name] != nil else {
         fputs("Key '\(name)' not found\n", stderr)
         exit(1)
     }
-
     entries.removeValue(forKey: name)
     encrypt(serializeEnv(entries), using: key)
     print("Deleted '\(name)'")
@@ -258,11 +256,11 @@ case "set":
         }
         value = input
     }
-    setKey(name: args[2], value: value)
+    setSecret(name: args[2], value: value)
 
 case "delete", "rm":
     guard args.count == 3 else { fputs("Usage: keyguard delete <KEY>\n", stderr); exit(1) }
-    deleteKey(name: args[2])
+    deleteSecret(name: args[2])
 
 case "get":
     guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }

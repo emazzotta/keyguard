@@ -37,12 +37,23 @@ struct TestRunner {
         checkDict("base64 padding (==)",     parseEnv("TOKEN=abc123XYZ+/def456=="),  ["TOKEN": "abc123XYZ+/def456=="])
         checkDict("multiple entries",        parseEnv("A=1\nB=2\nC=3"),              ["A": "1", "B": "2", "C": "3"])
         checkDict("empty content",           parseEnv(""),                           [:])
+        checkDict("whitespace-only lines",  parseEnv("  \n  \n"),                   [:])
+        checkDict("key with empty value",   parseEnv("KEY="),                       [:])
+        checkDict("no equals sign",         parseEnv("INVALID_LINE"),               [:])
+        checkDict("export with extra space", parseEnv("export   KEY=value"),         ["KEY": "value"])
+        checkDict("tabs around key",        parseEnv("\tKEY=value\t"),               ["KEY": "value"])
+        checkDict("value with inner quotes", parseEnv(#"KEY=he said "hi""#),         ["KEY": #"he said "hi""#])
+        checkDict("single char value",      parseEnv("K=v"),                        ["K": "v"])
+        checkDict("numeric value",          parseEnv("PORT=8080"),                  ["PORT": "8080"])
 
         print("\nserializeEnv")
         checkStr("sorted alphabetically",   serializeEnv(["B": "2", "A": "1"]),     "A=1\nB=2")
         checkStr("empty dict",              serializeEnv([:]),                       "")
+        checkStr("single entry",            serializeEnv(["ONLY": "one"]),          "ONLY=one")
         checkDict("round-trip",             parseEnv(serializeEnv(["FOO": "bar", "TOKEN": "abc==", "KEY": "val=ue"])),
                                             ["FOO": "bar", "TOKEN": "abc==", "KEY": "val=ue"])
+        checkDict("round-trip single",     parseEnv(serializeEnv(["X": "y"])),    ["X": "y"])
+        checkDict("round-trip empty",      parseEnv(serializeEnv([:])),            [:])
 
         if failures > 0 {
             fputs("\n\(failures) failure(s)\n", stderr)
