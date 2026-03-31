@@ -160,6 +160,61 @@ def test_get_keys_list_calls_list_command(server):
     )
 
 
+def test_get_keys_list_with_timeout_passes_cache_duration(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="FOO\nBAR\n")) as mock_run:
+        status, body = http_get(server, "/_keys?timeout=60")
+
+    assert status == 200
+    assert "FOO" in body
+    mock_run.assert_called_once_with(
+        ["/usr/local/bin/keyguard", "list", "--cache-duration", "60"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_get_keys_list_with_timeout_serves_from_cache(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="FOO\nBAR\n")):
+        status1, body1 = http_get(server, "/_keys?timeout=30")
+
+    with patch("subprocess.run") as mock_run:
+        status2, body2 = http_get(server, "/_keys?timeout=30")
+
+    assert status1 == 200
+    assert status2 == 200
+    assert body1 == body2
+    keyguard_calls = [
+        c for c in mock_run.call_args_list
+        if c[0][0][0] == "/usr/local/bin/keyguard"
+    ]
+    assert len(keyguard_calls) == 0
+
+
+def test_get_keys_list_without_timeout_does_not_cache(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="FOO\n")):
+        http_get(server, "/_keys")
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="FOO\n")) as mock_run:
+        http_get(server, "/_keys")
+
+    mock_run.assert_called_once_with(
+        ["/usr/local/bin/keyguard", "list"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        input=None,
+    )
+
+
+def test_get_keys_list_touch_id_cancelled_returns_403(server):
+    with patch("subprocess.run", return_value=subprocess_result(2)):
+        status, body = http_get(server, "/_keys?timeout=30")
+
+    assert status == 403
+    assert "Touch ID" in body
+
+
 def test_get_missing_path_returns_400(server):
     status, _ = http_get(server, "/")
 

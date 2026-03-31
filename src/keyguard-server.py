@@ -275,7 +275,20 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             return
 
         if path == "_keys":
-            self._run_keyguard(["list"])
+            query = parse_qs(parsed.query)
+            timeout = _parse_timeout(query)
+            client_ip = self.client_address[0]
+            if timeout:
+                cached = _cache_get(client_ip, "_keys")
+                if cached is not None:
+                    self._respond(200, cached.encode(), "text/plain")
+                    return
+                result = self._fetch_list(timeout)
+                if result is not None:
+                    _cache_put(client_ip, "_keys", result, timeout)
+                    self._respond(200, result.encode(), "text/plain")
+            else:
+                self._run_keyguard(["list"])
             return
 
         keys = [k.strip() for k in path.split(",") if k.strip()]
@@ -328,6 +341,27 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         body = _format_response(keys, all_values)
         self._respond(200, body.encode(), "text/plain")
         _notify_async(keys, client_ip, cached=False, source_hint=source_hint)
+
+    def _fetch_list(self, cache_duration: int) -> str | None:
+        cmd = ["list", "--cache-duration", str(cache_duration)]
+        try:
+            result = subprocess.run(
+                [str(KEYGUARD_BIN)] + cmd,
+                capture_output=True, text=True,
+                timeout=SUBPROCESS_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            self._respond(500, b"keyguard timed out")
+            return None
+
+        if result.returncode == 2:
+            self._respond(403, b"Touch ID cancelled or failed")
+            return None
+        if result.returncode != 0:
+            self._respond(500, result.stderr.encode())
+            return None
+
+        return result.stdout
 
     def _fetch_keys(self, keys: list[str], cache_duration: int) -> dict[str, str] | None:
         cmd = ["get"] + keys + ["--cache-duration", str(cache_duration)]
