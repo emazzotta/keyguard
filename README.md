@@ -73,6 +73,16 @@ keyguard delete MY_API_TOKEN   # remove a key
 keyguard clear                 # wipe everything (secrets file + encryption key)
 ```
 
+**Backup and restore the encryption key:**
+```bash
+keyguard export-key            # print base64-encoded encryption key to stdout
+keyguard import-key            # import key interactively (prompts for paste)
+keyguard import-key <base64>   # import key from argument
+echo "<base64>" | keyguard import-key  # import key from stdin
+```
+
+`export-key` outputs the raw 256-bit AES key as base64 (44 characters). Store it somewhere safe - with this key and the `secrets.enc` file you can restore your secrets on any Mac. `import-key` refuses to overwrite an existing key - run `keyguard clear` first if replacing.
+
 ## Using from Docker
 
 From inside any Docker container on the same machine:
@@ -135,6 +145,7 @@ Set this in your shell profile before running `make install` — the value is ba
 | Request from another device on the network | Server rejects all IPs outside localhost and Docker subnets |
 | Inline `keyguard set KEY value` | Warning printed to stderr — use the interactive prompt instead |
 | `POST /<name>` from container | Value piped to `keyguard` via stdin — never appears in process args or `ps` |
+| Exported encryption key leaked | Touch ID required to export; not available over HTTP; stderr warning reminds user to store safely |
 
 ### Encryption details
 

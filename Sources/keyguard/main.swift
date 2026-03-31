@@ -224,9 +224,34 @@ func importEnv(path: String) {
     print("You can now delete the plaintext file: rm \(url.path)")
 }
 
+func exportKey() {
+    authenticate(reason: "Export encryption key")
+    guard let key = loadKey() else {
+        fputs("No encryption key found in Keychain\n", stderr)
+        exit(1)
+    }
+    let encoded = key.withUnsafeBytes { Data($0).base64EncodedString() }
+    fputs("Warning: treat this key like a master password - it decrypts all your secrets\n", stderr)
+    print(encoded, terminator: "")
+}
+
+func importKey(base64: String) {
+    guard let data = Data(base64Encoded: base64), data.count == 32 else {
+        fputs("Invalid key: expected 44-character base64 encoding of a 256-bit key\n", stderr)
+        exit(1)
+    }
+    if loadKey() != nil {
+        fputs("Keychain already contains an encryption key. Run 'keyguard clear' first to replace it.\n", stderr)
+        exit(1)
+    }
+    authenticate(reason: "Import encryption key")
+    storeKey(SymmetricKey(data: data))
+    print("Encryption key imported into Keychain")
+}
+
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    fputs("Usage: keyguard <clear|import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    fputs("Usage: keyguard <clear|import|import-key|export-key|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
     exit(1)
 }
 
@@ -299,7 +324,28 @@ case "list":
 case "export":
     print(decrypt(reason: "Export all secrets"), terminator: "")
 
+case "export-key":
+    exportKey()
+
+case "import-key":
+    let base64: String
+    if args.count == 3 {
+        base64 = args[2]
+    } else if isatty(STDIN_FILENO) != 0 {
+        fputs("Paste base64 key: ", stderr)
+        guard let input = readLine(strippingNewline: true), !input.isEmpty else {
+            fputs("No key provided\n", stderr); exit(1)
+        }
+        base64 = input
+    } else {
+        guard let input = readLine(strippingNewline: true), !input.isEmpty else {
+            fputs("No key provided via stdin\n", stderr); exit(1)
+        }
+        base64 = input
+    }
+    importKey(base64: base64)
+
 default:
-    fputs("Unknown command '\(args[1])'\nUsage: keyguard <clear|import|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
+    fputs("Unknown command '\(args[1])'\nUsage: keyguard <clear|import|import-key|export-key|set|delete|get|list|export> [KEY] [VALUE]\n", stderr)
     exit(1)
 }
