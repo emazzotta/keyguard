@@ -141,6 +141,12 @@ func readSecret() -> String? {
 
 func loadOrInitSecrets(reason: String) -> (SymmetricKey, [String: String]) {
     guard FileManager.default.fileExists(atPath: SECRETS_FILE.path) else {
+        if loadKey() != nil {
+            fputs("Keychain already contains an encryption key but no secrets file at \(SECRETS_FILE.path)\n", stderr)
+            fputs("Generating a new key would make any existing .enc file permanently undecryptable.\n", stderr)
+            fputs("If you want to start fresh, run 'keyguard clear' first.\n", stderr)
+            exit(1)
+        }
         let key = SymmetricKey(size: .bits256)
         storeKey(key)
         return (key, [:])
