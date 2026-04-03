@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import ipaddress
 import subprocess
 import sys
@@ -215,10 +216,27 @@ def _parse_timeout(query: dict[str, list[str]]) -> int | None:
         return None
 
 
+def _decode_base64_value(value: str) -> str:
+    if value.startswith("base64:"):
+        try:
+            return base64.b64decode(value[7:], validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            pass
+    return value
+
+
+def _encode_base64_value(value: str) -> str:
+    if "\n" in value:
+        return "base64:" + base64.b64encode(value.encode("utf-8")).decode("ascii")
+    return value
+
+
 def _format_response(keys: list[str], values: dict[str, str | None]) -> str:
     if len(keys) == 1:
         return values[keys[0]] or ""
-    return "\n".join(f"{k}={values[k]}" for k in keys if values[k] is not None) + "\n"
+    return "\n".join(
+        f"{k}={_encode_base64_value(values[k])}" for k in keys if values[k] is not None
+    ) + "\n"
 
 
 def _parse_key_value_output(stdout: str) -> dict[str, str]:
@@ -226,7 +244,7 @@ def _parse_key_value_output(stdout: str) -> dict[str, str]:
     for line in stdout.strip().split("\n"):
         if "=" in line:
             k, v = line.split("=", 1)
-            values[k] = v
+            values[k] = _decode_base64_value(v)
     return values
 
 

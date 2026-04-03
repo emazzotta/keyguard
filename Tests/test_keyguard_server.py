@@ -27,6 +27,9 @@ _cache_get_shared = _module._cache_get_shared
 _parse_timeout = _module._parse_timeout
 _parse_share = _module._parse_share
 _format_response = _module._format_response
+_decode_base64_value = _module._decode_base64_value
+_encode_base64_value = _module._encode_base64_value
+_parse_key_value_output = _module._parse_key_value_output
 _resolve_source = _module._resolve_source
 _resolve_hostname = _module._resolve_hostname
 _resolve_container_name = _module._resolve_container_name
@@ -685,13 +688,58 @@ def test_parse_timeout_invalid_returns_none():
     assert _parse_timeout({"timeout": ["abc"]}) is None
 
 
+def test_decode_base64_value_plain():
+    assert _decode_base64_value("hello") == "hello"
+
+
+def test_decode_base64_value_encoded():
+    import base64
+    encoded = base64.b64encode(b'{"key": "val"}').decode()
+    assert _decode_base64_value(f"base64:{encoded}") == '{"key": "val"}'
+
+
+def test_decode_base64_value_invalid():
+    assert _decode_base64_value("base64:!!!") == "base64:!!!"
+
+
+def test_encode_base64_value_singleline():
+    assert _encode_base64_value("hello") == "hello"
+
+
+def test_encode_base64_value_multiline():
+    result = _encode_base64_value("line1\nline2")
+    assert result.startswith("base64:")
+    assert _decode_base64_value(result) == "line1\nline2"
+
+
+def test_parse_key_value_output_with_base64():
+    import base64
+    encoded = base64.b64encode(b'{\n  "type": "sa"\n}').decode()
+    output = f"JSON_KEY=base64:{encoded}\nPLAIN=hello"
+    result = _parse_key_value_output(output)
+    assert result["JSON_KEY"] == '{\n  "type": "sa"\n}'
+    assert result["PLAIN"] == "hello"
+
+
 def test_format_response_single_key():
     assert _format_response(["TOKEN"], {"TOKEN": "secret"}) == "secret"
+
+
+def test_format_response_single_key_multiline():
+    assert _format_response(["K"], {"K": "line1\nline2"}) == "line1\nline2"
 
 
 def test_format_response_multiple_keys():
     result = _format_response(["A", "B"], {"A": "1", "B": "2"})
     assert result == "A=1\nB=2\n"
+
+
+def test_format_response_multiple_keys_with_multiline():
+    result = _format_response(["A", "B"], {"A": "multi\nline", "B": "plain"})
+    lines = result.strip().split("\n")
+    assert len(lines) == 2
+    assert lines[0].startswith("A=base64:")
+    assert lines[1] == "B=plain"
 
 
 def test_cache_put_and_get():

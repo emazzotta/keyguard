@@ -379,7 +379,14 @@ case "get":
     if keys.count == 1 {
         print(env[keys[0]]!, terminator: "")
     } else {
-        keys.forEach { print("\($0)=\(env[$0]!)") }
+        keys.forEach {
+            let val = env[$0]!
+            if val.contains("\n") {
+                print("\($0)=base64:\(Data(val.utf8).base64EncodedString())")
+            } else {
+                print("\($0)=\(val)")
+            }
+        }
     }
 
 case "list":
