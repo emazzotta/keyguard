@@ -351,7 +351,9 @@ case "set":
         }
         value = input
     } else {
-        guard let input = readLine(strippingNewline: true), !input.isEmpty else {
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        guard let input = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !input.isEmpty else {
             fputs("No value provided via stdin\n", stderr); exit(1)
         }
         value = input
