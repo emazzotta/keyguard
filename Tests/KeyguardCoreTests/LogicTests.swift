@@ -46,14 +46,27 @@ struct TestRunner {
         checkDict("single char value",      parseEnv("K=v"),                        ["K": "v"])
         checkDict("numeric value",          parseEnv("PORT=8080"),                  ["PORT": "8080"])
 
+        let multiLineJson = "{\n  \"type\": \"service_account\",\n  \"key\": \"value\"\n}"
+        checkDict("base64-encoded multiline value",
+                  parseEnv("KEY=base64:\(Data(multiLineJson.utf8).base64EncodedString())"),
+                  ["KEY": multiLineJson])
+        checkDict("plain base64 padding not decoded",
+                  parseEnv("TOKEN=abc123XYZ+/def456=="),
+                  ["TOKEN": "abc123XYZ+/def456=="])
+
         print("\nserializeEnv")
         checkStr("sorted alphabetically",   serializeEnv(["B": "2", "A": "1"]),     "A=1\nB=2")
         checkStr("empty dict",              serializeEnv([:]),                       "")
         checkStr("single entry",            serializeEnv(["ONLY": "one"]),          "ONLY=one")
+        checkStr("multiline value base64-encoded",
+                 serializeEnv(["KEY": multiLineJson]),
+                 "KEY=base64:\(Data(multiLineJson.utf8).base64EncodedString())")
         checkDict("round-trip",             parseEnv(serializeEnv(["FOO": "bar", "TOKEN": "abc==", "KEY": "val=ue"])),
                                             ["FOO": "bar", "TOKEN": "abc==", "KEY": "val=ue"])
         checkDict("round-trip single",     parseEnv(serializeEnv(["X": "y"])),    ["X": "y"])
         checkDict("round-trip empty",      parseEnv(serializeEnv([:])),            [:])
+        checkDict("round-trip multiline",  parseEnv(serializeEnv(["JSON": multiLineJson, "PLAIN": "hello"])),
+                                           ["JSON": multiLineJson, "PLAIN": "hello"])
 
         func checkArgs(_ desc: String, _ actual: ParsedArgs, positional: [String], cacheDuration: Int?) {
             let posOk = actual.positional == positional

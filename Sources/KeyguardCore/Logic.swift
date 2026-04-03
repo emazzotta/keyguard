@@ -1,5 +1,7 @@
 import Foundation
 
+private let base64Prefix = "base64:"
+
 public func parseEnv(_ content: String) -> [String: String] {
     var entries: [String: String] = [:]
     for line in content.components(separatedBy: .newlines) {
@@ -18,13 +20,25 @@ public func parseEnv(_ content: String) -> [String: String] {
         } else if let range = value.range(of: #"\s+#.*$"#, options: .regularExpression) {
             value = String(value[value.startIndex..<range.lowerBound])
         }
+        if value.hasPrefix(base64Prefix),
+           let data = Data(base64Encoded: String(value.dropFirst(base64Prefix.count))),
+           let decoded = String(data: data, encoding: .utf8) {
+            value = decoded
+        }
         entries[key] = value
     }
     return entries
 }
 
 public func serializeEnv(_ entries: [String: String]) -> String {
-    entries.keys.sorted().map { "\($0)=\(entries[$0]!)" }.joined(separator: "\n")
+    entries.keys.sorted().map { key in
+        let value = entries[key]!
+        if value.contains("\n") {
+            let encoded = Data(value.utf8).base64EncodedString()
+            return "\(key)=\(base64Prefix)\(encoded)"
+        }
+        return "\(key)=\(value)"
+    }.joined(separator: "\n")
 }
 
 public struct ParsedArgs {
