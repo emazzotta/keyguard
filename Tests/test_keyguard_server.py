@@ -548,6 +548,84 @@ def test_cache_from_different_ip_not_shared_by_default(server):
 
 
 # ---------------------------------------------------------------------------
+# Cache isolation — cached reads must not influence other operations
+# ---------------------------------------------------------------------------
+
+
+def test_cached_token_does_not_serve_list(server):
+    _cache_put("127.0.0.1", "TOKEN_A", "secret-a", 60)
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="TOKEN_A\nTOKEN_B\n")) as mock_run:
+        status, body = http_get(server, "/_keys?timeout=60")
+
+    assert status == 200
+    keyguard_calls = [
+        c for c in mock_run.call_args_list
+        if c[0][0][0] == "/usr/local/bin/keyguard"
+    ]
+    assert len(keyguard_calls) == 1
+    assert keyguard_calls[0][0][0] == [
+        "/usr/local/bin/keyguard", "list", "--cache-duration", "60",
+    ]
+
+
+def test_cached_list_does_not_serve_token_read(server):
+    _cache_put("127.0.0.1", "_keys", "TOKEN_A\nTOKEN_B\n", 60)
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret-a")) as mock_run:
+        status, body = http_get(server, "/TOKEN_A?timeout=60")
+
+    assert status == 200
+    assert body == "secret-a"
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "TOKEN_A", "--cache-duration", "60"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_cached_token_does_not_bypass_touch_id_on_set(server):
+    _cache_put("127.0.0.1", "TOKEN_A", "old-value", 60)
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="Set 'TOKEN_A'")) as mock_run:
+        status, _ = http_post(server, "/TOKEN_A", body="new-value")
+
+    assert status == 200
+    keyguard_calls = [
+        c for c in mock_run.call_args_list
+        if c[0][0][0] == "/usr/local/bin/keyguard"
+    ]
+    assert len(keyguard_calls) == 1
+    assert keyguard_calls[0][0][0] == ["/usr/local/bin/keyguard", "set", "TOKEN_A"]
+    assert keyguard_calls[0][1]["input"] == "new-value"
+
+
+def test_list_with_timeout_does_not_populate_per_token_cache(server):
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="TOKEN_A\nTOKEN_B\n")):
+        http_get(server, "/_keys?timeout=60")
+
+    assert _cache_get("127.0.0.1", "TOKEN_A") is None
+    assert _cache_get("127.0.0.1", "TOKEN_B") is None
+
+
+def test_cached_token_a_does_not_serve_token_b(server):
+    _cache_put("127.0.0.1", "TOKEN_A", "secret-a", 60)
+
+    with patch("subprocess.run", return_value=subprocess_result(0, stdout="secret-b")) as mock_run:
+        status, body = http_get(server, "/TOKEN_B?timeout=60")
+
+    assert status == 200
+    assert body == "secret-b"
+    mock_run.assert_any_call(
+        ["/usr/local/bin/keyguard", "get", "TOKEN_B", "--cache-duration", "60"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+# ---------------------------------------------------------------------------
 # DELETE /_cache
 # ---------------------------------------------------------------------------
 
