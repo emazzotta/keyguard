@@ -109,6 +109,126 @@ curl -s -X POST http://host.docker.internal:7777/MY_API_TOKEN -d 'the-value'
 
 The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
 
+## Bridge endpoints
+
+The bridge lets you expose whitelisted Mac commands over HTTP. A Docker container can trigger a Spotify pause, send a system notification, or call any script you pre-approve — without SSH, without scripting on the host, and without exposing arbitrary command execution.
+
+### Setup
+
+Install PyYAML (one-time):
+
+```bash
+pip3 install pyyaml
+```
+
+Copy the example config to your home directory and customise it:
+
+```bash
+cp .mac-bridge-endpoints.yaml.example ~/.mac-bridge-endpoints.yaml
+chmod 600 ~/.mac-bridge-endpoints.yaml
+$EDITOR ~/.mac-bridge-endpoints.yaml
+```
+
+The file is gitignored — it never enters the repo. To use a different path, set `KEYGUARD_BRIDGE_CONFIG_FILE` in your shell profile **before** running `make install` — the value is baked into the launchd plist (same pattern as `KEYGUARD_SECRETS_FILE`):
+
+```bash
+export KEYGUARD_BRIDGE_CONFIG_FILE=~/Dropbox/keyguard/bridge.yaml
+make install
+make restart
+```
+
+### Generating and storing the token
+
+The bridge token always lives inside keyguard itself — no plaintext-on-disk option. Generate a random value and store it under the fixed name `MAC_BRIDGE_TOKEN`:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))" \
+  | xargs -0 keyguard set MAC_BRIDGE_TOKEN
+```
+
+That's the entire token setup. The YAML config only contains endpoint definitions.
+
+The server reads `MAC_BRIDGE_TOKEN` from keyguard on the **first authenticated bridge request** (lazy load) — one Touch ID prompt per server lifetime, then cached in process memory. Send `SIGHUP` to force a re-resolve.
+
+Two layers protect the Touch ID prompt from abuse:
+
+1. Requests without a well-formed `Authorization: Bearer …` header are rejected **before** keyguard is invoked. Unauthenticated callers cannot trigger a prompt at all.
+2. Failed resolutions (Touch ID denied, key missing) are rate-limited to one attempt per 60 seconds. A misconfigured client cannot spam prompts.
+
+### Reloading config
+
+```bash
+kill -HUP $(launchctl list | awk '/com.keyguard.server/{print $1}')
+```
+
+This re-reads the YAML file, clears the cached token, and clears the rate-limit state.
+
+### Config format
+
+```yaml
+endpoints:
+  spotify-play:
+    command: [osascript, -e, 'tell application "Spotify" to play']
+    method: POST          # GET | POST | [GET, POST]  (default: POST)
+
+  system-notify:
+    command: [osascript, -e, 'display notification "bridge triggered" with title "keyguard"']
+    method: POST
+
+  uptime:
+    command: [/usr/bin/uptime]
+    method: GET           # read-only by convention
+
+  say:
+    command: [/usr/bin/say]
+    method: POST
+    stdin: true           # pipe POST body to the command's stdin
+    timeout: 15           # seconds before the process is killed (default: 60)
+```
+
+**Command rules:**
+- Must be a YAML list — no shell string, no glob expansion, no interpolation.
+- The executable path must be absolute, or resolvable via the server's `$PATH`.
+- No user-controlled values are ever passed into command arguments — the only caller input that reaches the command is the POST body via `stdin: true`.
+
+### Usage from Docker
+
+```bash
+TOKEN="your-random-token-here"
+
+# Trigger a command (POST)
+curl -s -X POST http://host.docker.internal:7777/_bridge/spotify-play \
+  -H "Authorization: Bearer $TOKEN"
+
+# Read output (GET)
+curl -s http://host.docker.internal:7777/_bridge/uptime \
+  -H "Authorization: Bearer $TOKEN"
+
+# Pass data as stdin (POST + stdin)
+curl -s -X POST http://host.docker.internal:7777/_bridge/say \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "hello from your container"
+```
+
+Every successful bridge call sends a macOS notification with the endpoint name and caller IP.
+
+### Security
+
+| Concern | How it is handled |
+|---|---|
+| Unauthenticated call | `Authorization: Bearer <token>` required; 401 otherwise |
+| Token interception on the network | Only localhost and Docker internal subnets are accepted (same as keyguard secrets) |
+| Token at rest | The token lives inside the AES-256-GCM-encrypted keyguard store under `MAC_BRIDGE_TOKEN` — never on disk in plaintext |
+| Touch ID prompt spam from unauthenticated callers | Requests without a `Bearer …` header are rejected *before* keyguard is invoked — no prompt fires for malformed/missing auth |
+| Touch ID prompt spam from misconfigured callers | Failed token resolutions are rate-limited to 1 per 60 seconds; SIGHUP clears the limit |
+| Command injection via request body | Body can only reach `stdin` — never command args. Commands are fixed lists, no shell involved |
+| Arbitrary command execution | Only commands declared in the gitignored config file run; no dynamic dispatch |
+| Endpoint enumeration | 404 for unknown endpoints regardless of auth; timing is identical to auth failure |
+| Token brute force | `hmac.compare_digest` (constant-time) prevents timing attacks; IP allowlist limits the attack surface to Docker networks |
+| Config file leaks to git | `.mac-bridge-endpoints.yaml` is in `.gitignore` |
+
+The config file itself is the trust boundary: only what you write into it can be called.
+
 ## Custom secrets file path
 
 By default secrets are stored at `~/.keyguard/secrets.enc`. Override with an environment variable:
@@ -163,4 +283,5 @@ Set this in your shell profile before running `make install` — the value is ba
 - The encryption key in Keychain can be extracted with the macOS login password (no Touch ID required for that path)
 - Decrypted values are held in memory briefly and not explicitly zeroed
 - When the optional `?timeout=N` is used, decrypted values remain in the server process memory for the specified duration
-- All Docker containers on the machine have equal access to all secrets
+- All Docker containers on the machine have equal access to all secrets and bridge endpoints — there is no per-container scoping
+- The bridge command list lives in `~/.mac-bridge-endpoints.yaml`; protect the file with `chmod 600` so only your user can edit which commands the bridge will run

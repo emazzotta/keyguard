@@ -13,6 +13,8 @@
     <dict>
         <key>KEYGUARD_SECRETS_FILE</key>
         <string>__SECRETS_FILE__</string>
+        <key>KEYGUARD_BRIDGE_CONFIG_FILE</key>
+        <string>__BRIDGE_CONFIG_FILE__</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>

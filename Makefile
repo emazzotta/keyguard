@@ -1,10 +1,11 @@
 .PHONY: all build test test-swift test-python clean install uninstall start stop restart status help
 .DEFAULT_GOAL := all
 
-PREFIX        ?= /usr/local
-LAUNCH_AGENTS := $(HOME)/Library/LaunchAgents
-LOGS_DIR      := $(HOME)/Library/Logs
-SECRETS_FILE  ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.enc)
+PREFIX             ?= /usr/local
+LAUNCH_AGENTS      := $(HOME)/Library/LaunchAgents
+LOGS_DIR           := $(HOME)/Library/Logs
+SECRETS_FILE       ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.enc)
+BRIDGE_CONFIG_FILE ?= $(or $(KEYGUARD_BRIDGE_CONFIG_FILE),$(HOME)/.mac-bridge-endpoints.yaml)
 
 BINARY     := $(PREFIX)/bin/keyguard
 SERVER_DIR := $(PREFIX)/lib/keyguard
@@ -30,6 +31,9 @@ help: ## Show available targets
 	@echo ""
 	@echo "  Custom secrets file path:"
 	@echo "    export KEYGUARD_SECRETS_FILE=/path/to/secrets.enc"
+	@echo ""
+	@echo "  Custom bridge config path:"
+	@echo "    export KEYGUARD_BRIDGE_CONFIG_FILE=/path/to/bridge.yaml"
 
 build: bin/keyguard ## Compile the Swift binary
 
@@ -49,11 +53,12 @@ test-python: ## Run Python tests
 	python3 -m pytest Tests/test_keyguard_server.py -v
 
 install: build ## Install binary, server, and register launchd agent
-	sudo install -d "$(PREFIX)/bin" "$(SERVER_DIR)"
+	sudo install -d "$(PREFIX)/bin" "$(SERVER_DIR)" "$(SERVER_DIR)/keyguard_server"
 	sudo install -m 755 bin/keyguard "$(BINARY)"
-	sudo install -m 644 src/keyguard-server.py "$(SERVER)"
+	sudo install -m 755 src/keyguard-server.py "$(SERVER)"
+	sudo install -m 644 src/keyguard_server/*.py "$(SERVER_DIR)/keyguard_server/"
 	mkdir -p "$(LAUNCH_AGENTS)" "$(LOGS_DIR)"
-	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g' \
+	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g' \
 		com.keyguard.server.plist > "$(PLIST)"
 	@echo "Installed. Run 'make start' to start the server."
 
@@ -62,7 +67,7 @@ clean: ## Remove compiled binary
 
 uninstall: stop ## Remove all installed files
 	sudo rm -f "$(BINARY)"
-	sudo rm -rf "$(SERVER_DIR)"
+	sudo rm -rf "$(SERVER_DIR)" "$(SERVER_DIR)/keyguard_server"
 	rm -f "$(PLIST)"
 
 start: ## Start the keyguard server via launchd

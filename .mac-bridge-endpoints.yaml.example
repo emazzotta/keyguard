@@ -1,0 +1,56 @@
+# Bridge endpoint configuration for keyguard-server.
+#
+# 1. Copy to ~/.mac-bridge-endpoints.yaml (it is gitignored in this project)
+#    and chmod 600 it so only your user can edit which commands the bridge runs.
+#
+#    To use a different path, set KEYGUARD_BRIDGE_CONFIG_FILE in your shell
+#    BEFORE running `make install` - the value is baked into the launchd plist:
+#      export KEYGUARD_BRIDGE_CONFIG_FILE=~/Dropbox/keyguard/bridge.yaml
+#      make install && make restart
+#
+# 2. Store a random token in keyguard:
+#      python3 -c "import secrets; print(secrets.token_urlsafe(32))" \
+#        | xargs -0 keyguard set MAC_BRIDGE_TOKEN
+#    The token is read from keyguard on the FIRST authenticated bridge call
+#    (one Touch ID prompt per server lifetime), then cached in memory.
+#
+# 3. Reload after editing this file:
+#      kill -HUP $(launchctl list | awk '/com.keyguard.server/{print $1}')
+#
+# Usage from a Docker container:
+#   curl -s -X POST http://host.docker.internal:7777/_bridge/spotify-play \
+#     -H "Authorization: Bearer <your-token>"
+#
+# Endpoint options:
+#   command   (required) list of executable + args - no shell, no interpolation
+#   method    GET | POST | [GET, POST]  (default: POST)
+#   stdin     true | false  - pipe POST body to the command's stdin (default: false)
+#   timeout   seconds before the command is killed (default: 60)
+
+endpoints:
+  spotify-play:
+    command: [osascript, -e, 'tell application "Spotify" to play']
+    method: POST
+
+  spotify-pause:
+    command: [osascript, -e, 'tell application "Spotify" to pause']
+    method: POST
+
+  spotify-next:
+    command: [osascript, -e, 'tell application "Spotify" to next track']
+    method: POST
+
+  system-notify:
+    command: [osascript, -e, 'display notification "bridge triggered" with title "keyguard"']
+    method: POST
+
+  # Example: run a script and return its stdout (GET = read-only by convention)
+  # uptime:
+  #   command: [/usr/bin/uptime]
+  #   method: GET
+
+  # Example: pipe POST body as stdin to a command
+  # say:
+  #   command: [/usr/bin/say]
+  #   method: POST
+  #   stdin: true
