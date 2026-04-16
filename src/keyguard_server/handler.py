@@ -1,6 +1,7 @@
 """HTTP request handler - routes requests to secrets API or bridge."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler
@@ -17,6 +18,7 @@ from .keyguard_cli import CliResult
 
 
 _BRIDGE_PREFIX = "_bridge/"
+_BRIDGE_LIST = "list"
 _KEYS_PATH = "_keys"
 _CACHE_PATH = "_cache"
 
@@ -169,6 +171,11 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
         if not bridge.verify_token(auth):
             self._respond(401, b"Unauthorized")
+            return
+
+        if name == _BRIDGE_LIST:
+            payload = json.dumps(bridge.list_endpoints()).encode()
+            self._respond(200, payload, content_type="application/json")
             return
 
         endpoint = bridge.get_endpoint(name)

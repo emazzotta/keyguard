@@ -45,6 +45,49 @@ def test_not_configured_returns_501(server, monkeypatch):
     assert "not configured" in body.lower()
 
 
+# ---- _bridge/list ----
+
+
+def test_list_returns_200_with_json(server, configured_bridge):
+    status, body = http_bridge_get(server, "list", token=BRIDGE_TOKEN)
+    assert status == 200
+    endpoints = __import__("json").loads(body)
+    names = {e["name"] for e in endpoints}
+    assert names == {"echo", "get-status", "stdin-endpoint"}
+
+
+def test_list_includes_methods_and_timeout(server, configured_bridge):
+    _, body = http_bridge_get(server, "list", token=BRIDGE_TOKEN)
+    endpoints = __import__("json").loads(body)
+    by_name = {e["name"]: e for e in endpoints}
+    assert by_name["echo"]["methods"] == ["POST"]
+    assert by_name["get-status"]["methods"] == ["GET"]
+    assert by_name["echo"]["timeout"] == 10
+
+
+def test_list_does_not_expose_command(server, configured_bridge):
+    _, body = http_bridge_get(server, "list", token=BRIDGE_TOKEN)
+    assert "command" not in body
+    assert "/bin/echo" not in body
+
+
+def test_list_requires_auth(server, configured_bridge):
+    status, _ = http_bridge_get(server, "list", token=None)
+    assert status == 401
+
+
+def test_list_rejects_wrong_token(server, configured_bridge):
+    status, _ = http_bridge_get(server, "list", token="bad-token")
+    assert status == 401
+
+
+def test_list_returns_sorted_names(server, configured_bridge):
+    _, body = http_bridge_get(server, "list", token=BRIDGE_TOKEN)
+    endpoints = __import__("json").loads(body)
+    names = [e["name"] for e in endpoints]
+    assert names == sorted(names)
+
+
 # ---- Endpoint dispatch ----
 
 

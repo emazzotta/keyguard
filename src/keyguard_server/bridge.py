@@ -56,6 +56,18 @@ def get_endpoint(name: str) -> Endpoint | None:
     return _endpoints.get(name)
 
 
+def list_endpoints() -> list[dict]:
+    """Return public metadata for all configured endpoints, sorted by name.
+
+    Command is intentionally omitted - callers need to know what they can call,
+    not the underlying implementation.
+    """
+    return [
+        {"name": name, "methods": sorted(ep.allowed_methods), "timeout": ep.timeout}
+        for name, ep in sorted(_endpoints.items())
+    ]
+
+
 def ensure_config() -> None:
     """Load the bridge config from disk on first call after each SIGHUP / startup."""
     global _config_dirty
