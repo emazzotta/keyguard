@@ -50,7 +50,7 @@ test-swift: ## Run Swift unit tests
 	swiftc -parse-as-library Sources/KeyguardCore/Logic.swift Tests/KeyguardCoreTests/LogicTests.swift -o bin/test-logic && bin/test-logic
 
 test-python: ## Run Python tests
-	python3 -m pytest Tests/test_keyguard_server.py -v
+	python3 -m pytest Tests/ -v
 
 install: build ## Install binary, server, and register launchd agent
 	sudo install -d "$(PREFIX)/bin" "$(SERVER_DIR)" "$(SERVER_DIR)/keyguard_server"
