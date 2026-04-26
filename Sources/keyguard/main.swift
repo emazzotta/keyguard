@@ -195,6 +195,25 @@ func deleteSecret(name: String) {
     print("Deleted '\(name)'")
 }
 
+func renameSecret(from oldKey: String, to newKey: String, force: Bool) {
+    let (key, content) = decryptWithKey(reason: "Rename \(oldKey) to \(newKey)")
+    let entries = parseEnv(content)
+    let updated: [String: String]
+    do {
+        updated = try renameEntry(in: entries, from: oldKey, to: newKey, overwrite: force)
+    } catch RenameError.sameKey {
+        fputs("Source and destination must differ\n", stderr); exit(1)
+    } catch RenameError.sourceNotFound(let name) {
+        fputs("Key '\(name)' not found\n", stderr); exit(1)
+    } catch RenameError.destinationExists(let name) {
+        fputs("Key '\(name)' already exists; use --force to overwrite\n", stderr); exit(1)
+    } catch {
+        fputs("Rename failed: \(error)\n", stderr); exit(1)
+    }
+    encrypt(serializeEnv(updated), using: key)
+    print("Renamed '\(oldKey)' to '\(newKey)'")
+}
+
 func clearSecrets() {
     authenticate(reason: "Clear all secrets")
     try? FileManager.default.removeItem(at: SECRETS_FILE)
@@ -296,6 +315,8 @@ func printUsage() {
           [--cache-duration N]       Cache the decryption for N seconds
       set <KEY> [VALUE]            Store a secret (prompts for value if omitted)
       delete <KEY>                 Remove a secret (alias: rm)
+      mv <OLD> <NEW> [--force]     Rename a secret (alias: rename)
+                                     --force overwrites NEW if it already exists
       list [--cache-duration N]    List all secret names
       import <path> [--force]      Import secrets from a .env file
                                      --force overwrites existing keys without prompting
@@ -315,6 +336,7 @@ func printUsage() {
       keyguard get TOKEN_A TOKEN_B --cache-duration 120
       keyguard import ~/secrets.env --force
       keyguard delete OLD_KEY
+      keyguard mv HETZNER_USER HETZNER_ACCOUNT_USER
     """
     fputs(text + "\n", stderr)
 }
@@ -363,6 +385,15 @@ case "set":
 case "delete", "rm":
     guard args.count == 3 else { fputs("Usage: keyguard delete <KEY>\n", stderr); exit(1) }
     deleteSecret(name: args[2])
+
+case "mv", "rename":
+    let rest = Array(args.dropFirst(2))
+    let force = rest.contains("--force")
+    let positional = rest.filter { $0 != "--force" }
+    guard positional.count == 2 else {
+        fputs("Usage: keyguard mv <OLD> <NEW> [--force]\n", stderr); exit(1)
+    }
+    renameSecret(from: positional[0], to: positional[1], force: force)
 
 case "get":
     guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }

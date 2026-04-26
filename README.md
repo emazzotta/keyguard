@@ -70,10 +70,12 @@ Touch ID prompt shows exactly what is being revealed: `"Reveal MY_API_TOKEN, PAS
 
 **Other commands (all require Touch ID):**
 ```bash
-keyguard list                  # list key names
-keyguard export                # print all key=value pairs
-keyguard delete MY_API_TOKEN   # remove a key
-keyguard clear                 # wipe everything (secrets file + encryption key)
+keyguard list                                        # list key names
+keyguard export                                      # print all key=value pairs
+keyguard delete MY_API_TOKEN                         # remove a key
+keyguard mv HETZNER_USER HETZNER_ACCOUNT_USER        # rename a key (alias: rename)
+keyguard mv OLD NEW --force                          # overwrite NEW if it already exists
+keyguard clear                                       # wipe everything (secrets file + encryption key)
 ```
 
 **Backup and restore the encryption key:**

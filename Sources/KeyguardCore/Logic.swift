@@ -71,3 +71,26 @@ public func buildReason(base: String, cacheDuration: Int?) -> String {
     guard let duration = cacheDuration else { return base }
     return "\(base) (cached for \(duration)s)"
 }
+
+public enum RenameError: Error, Equatable {
+    case sourceNotFound(String)
+    case sameKey
+    case destinationExists(String)
+}
+
+public func renameEntry(
+    in entries: [String: String],
+    from oldKey: String,
+    to newKey: String,
+    overwrite: Bool = false
+) throws -> [String: String] {
+    guard oldKey != newKey else { throw RenameError.sameKey }
+    guard let value = entries[oldKey] else { throw RenameError.sourceNotFound(oldKey) }
+    if entries[newKey] != nil && !overwrite {
+        throw RenameError.destinationExists(newKey)
+    }
+    var result = entries
+    result.removeValue(forKey: oldKey)
+    result[newKey] = value
+    return result
+}

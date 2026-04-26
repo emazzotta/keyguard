@@ -95,6 +95,72 @@ struct TestRunner {
         checkStr("with cache",     buildReason(base: "List secrets", cacheDuration: 120),  "List secrets (cached for 120s)")
         checkStr("with zero",      buildReason(base: "Reveal TOKEN", cacheDuration: 0),    "Reveal TOKEN (cached for 0s)")
 
+        func checkRename(_ desc: String, _ block: () throws -> [String: String], _ expected: [String: String]) {
+            do {
+                let actual = try block()
+                if actual == expected {
+                    print("  ✓ \(desc)")
+                } else {
+                    print("  ✗ \(desc): got \(actual), want \(expected)")
+                    failures += 1
+                }
+            } catch {
+                print("  ✗ \(desc): unexpected error \(error)")
+                failures += 1
+            }
+        }
+
+        func checkRenameThrows(_ desc: String, _ block: () throws -> [String: String], _ expected: RenameError) {
+            do {
+                let actual = try block()
+                print("  ✗ \(desc): expected error \(expected), got \(actual)")
+                failures += 1
+            } catch let e as RenameError where e == expected {
+                print("  ✓ \(desc)")
+            } catch {
+                print("  ✗ \(desc): got error \(error), want \(expected)")
+                failures += 1
+            }
+        }
+
+        print("\nrenameEntry")
+        checkRename("basic rename moves value",
+                    { try renameEntry(in: ["A": "1"], from: "A", to: "B") },
+                    ["B": "1"])
+        checkRename("other entries preserved",
+                    { try renameEntry(in: ["A": "1", "C": "3"], from: "A", to: "B") },
+                    ["B": "1", "C": "3"])
+        checkRename("multiline value preserved",
+                    { try renameEntry(in: ["A": multiLineJson, "X": "y"], from: "A", to: "B") },
+                    ["B": multiLineJson, "X": "y"])
+        checkRename("value with equals signs preserved",
+                    { try renameEntry(in: ["A": "x=y=z"], from: "A", to: "B") },
+                    ["B": "x=y=z"])
+        checkRename("overwrite=true replaces existing destination",
+                    { try renameEntry(in: ["A": "1", "B": "2"], from: "A", to: "B", overwrite: true) },
+                    ["B": "1"])
+        checkRename("overwrite=false ok when destination is free",
+                    { try renameEntry(in: ["A": "1"], from: "A", to: "B", overwrite: false) },
+                    ["B": "1"])
+        checkRenameThrows("source missing throws sourceNotFound",
+                          { try renameEntry(in: [:], from: "X", to: "Y") },
+                          .sourceNotFound("X"))
+        checkRenameThrows("source missing in non-empty dict",
+                          { try renameEntry(in: ["A": "1"], from: "X", to: "Y") },
+                          .sourceNotFound("X"))
+        checkRenameThrows("same key throws sameKey",
+                          { try renameEntry(in: ["A": "1"], from: "A", to: "A") },
+                          .sameKey)
+        checkRenameThrows("same key wins over missing source check",
+                          { try renameEntry(in: [:], from: "X", to: "X") },
+                          .sameKey)
+        checkRenameThrows("destination exists without force",
+                          { try renameEntry(in: ["A": "1", "B": "2"], from: "A", to: "B") },
+                          .destinationExists("B"))
+        checkRenameThrows("destination exists explicit overwrite=false",
+                          { try renameEntry(in: ["A": "1", "B": "2"], from: "A", to: "B", overwrite: false) },
+                          .destinationExists("B"))
+
         if failures > 0 {
             fputs("\n\(failures) failure(s)\n", stderr)
             exit(1)
