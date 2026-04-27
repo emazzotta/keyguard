@@ -95,6 +95,12 @@ struct TestRunner {
         checkStr("with cache",     buildReason(base: "List secrets", cacheDuration: 120),  "List secrets (cached for 120s)")
         checkStr("with zero",      buildReason(base: "Reveal TOKEN", cacheDuration: 0),    "Reveal TOKEN (cached for 0s)")
 
+        print("\nsetSecretReason")
+        checkStr("new key uses Add",          setSecretReason(name: "API_TOKEN", exists: false), "Add API_TOKEN")
+        checkStr("existing key uses Update",  setSecretReason(name: "API_TOKEN", exists: true),  "Update API_TOKEN")
+        checkStr("name with underscores",     setSecretReason(name: "MY_LONG_KEY_NAME", exists: false), "Add MY_LONG_KEY_NAME")
+        checkStr("name with spaces",          setSecretReason(name: "two words", exists: true),  "Update two words")
+
         func checkRename(_ desc: String, _ block: () throws -> [String: String], _ expected: [String: String]) {
             do {
                 let actual = try block()

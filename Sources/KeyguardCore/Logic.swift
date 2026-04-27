@@ -72,6 +72,10 @@ public func buildReason(base: String, cacheDuration: Int?) -> String {
     return "\(base) (cached for \(duration)s)"
 }
 
+public func setSecretReason(name: String, exists: Bool) -> String {
+    exists ? "Update \(name)" : "Add \(name)"
+}
+
 public enum RenameError: Error, Equatable {
     case sourceNotFound(String)
     case sameKey

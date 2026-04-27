@@ -177,7 +177,37 @@ func loadOrInitSecrets(reason: String) -> (SymmetricKey, [String: String]) {
 }
 
 func setSecret(name: String, value: String) {
-    var (key, entries) = loadOrInitSecrets(reason: "Update \(name)")
+    var entries: [String: String] = [:]
+    let key: SymmetricKey
+
+    if FileManager.default.fileExists(atPath: SECRETS_FILE.path) {
+        guard let existingKey = loadKey() else {
+            fputs("No encryption key found in Keychain. Secrets file exists at \(SECRETS_FILE.path) but cannot be decrypted.\n", stderr)
+            fputs("If starting fresh, run 'keyguard clear' first, then re-import your secrets.\n", stderr)
+            exit(1)
+        }
+        guard let combined = try? Data(contentsOf: SECRETS_FILE),
+              let sealed = try? AES.GCM.SealedBox(combined: combined),
+              let decrypted = try? AES.GCM.open(sealed, using: existingKey),
+              let content = String(data: decrypted, encoding: .utf8) else {
+            fputs("Failed to read existing secrets - file may be corrupted or encrypted with a different key\n", stderr)
+            exit(1)
+        }
+        entries = parseEnv(content)
+        authenticate(reason: setSecretReason(name: name, exists: entries[name] != nil))
+        key = existingKey
+    } else {
+        if loadKey() != nil {
+            fputs("Keychain already contains an encryption key but no secrets file at \(SECRETS_FILE.path)\n", stderr)
+            fputs("Generating a new key would make any existing .enc file permanently undecryptable.\n", stderr)
+            fputs("If you want to start fresh, run 'keyguard clear' first.\n", stderr)
+            exit(1)
+        }
+        let newKey = SymmetricKey(size: .bits256)
+        storeKey(newKey)
+        key = newKey
+    }
+
     entries[name] = value
     encrypt(serializeEnv(entries), using: key)
     print("Set '\(name)'")
