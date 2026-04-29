@@ -1,4 +1,5 @@
 """Tests for bridge.ensure_config / _load_config_locked - real YAML files on disk."""
+import os
 import textwrap
 from pathlib import Path
 
@@ -18,6 +19,7 @@ def yaml_config(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(bridge, "_token_resolved", False)
     monkeypatch.setattr(bridge, "_token_last_attempt", 0.0)
     monkeypatch.setattr(bridge, "_config_dirty", True)
+    monkeypatch.setattr(bridge, "_config_mtime", 0.0)
 
     def write(content: str) -> None:
         config_file.write_text(textwrap.dedent(content))
@@ -242,6 +244,44 @@ def test_mark_dirty_causes_reload_on_next_ensure_config(yaml_config):
 
     assert bridge.get_endpoint("first") is None
     assert bridge.get_endpoint("second") is not None
+
+
+def test_should_reload_when_file_mtime_changes_without_sighup(yaml_config):
+    yaml_config("""
+        endpoints:
+          first:
+            command: [/bin/echo, one]
+    """)
+    assert bridge.get_endpoint("first") is not None
+
+    config_file = bridge.BRIDGE_CONFIG_PATH
+    config_file.write_text(textwrap.dedent("""
+        endpoints:
+          second:
+            command: [/bin/echo, two]
+    """))
+    mtime = config_file.stat().st_mtime
+    os.utime(config_file, (mtime + 1, mtime + 1))
+
+    bridge.ensure_config()
+
+    assert bridge.get_endpoint("first") is None
+    assert bridge.get_endpoint("second") is not None
+
+
+def test_should_not_reload_when_file_mtime_unchanged(yaml_config):
+    yaml_config("""
+        endpoints:
+          stable:
+            command: [/bin/echo, hi]
+    """)
+    config_file = bridge.BRIDGE_CONFIG_PATH
+    recorded_mtime = config_file.stat().st_mtime
+    os.utime(config_file, (recorded_mtime, recorded_mtime))
+
+    bridge.ensure_config()
+
+    assert bridge.get_endpoint("stable") is not None
 
 
 def test_mark_dirty_clears_resolved_token(yaml_config, monkeypatch):

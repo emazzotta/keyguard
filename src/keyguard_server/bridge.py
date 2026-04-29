@@ -37,6 +37,7 @@ _token: str = ""
 _token_resolved: bool = False
 _token_last_attempt: float = 0.0
 _config_dirty: bool = True
+_config_mtime: float = 0.0
 
 _config_lock = threading.Lock()
 _token_lock = threading.Lock()
@@ -69,15 +70,22 @@ def list_endpoints() -> list[dict]:
 
 
 def ensure_config() -> None:
-    """Load the bridge config from disk on first call after each SIGHUP / startup."""
+    """Load the bridge config from disk on startup, after SIGHUP, or when the file mtime changes."""
     global _config_dirty
-    if not _config_dirty:
+    if not _config_dirty and not _config_stale():
         return
     with _config_lock:
-        if not _config_dirty:
+        if not _config_dirty and not _config_stale():
             return
         _load_config_locked()
         _config_dirty = False
+
+
+def _config_stale() -> bool:
+    try:
+        return BRIDGE_CONFIG_PATH.stat().st_mtime != _config_mtime
+    except OSError:
+        return False
 
 
 def ensure_token() -> str | None:
@@ -120,6 +128,7 @@ def _reset_state_locked() -> None:
 
 
 def _load_config_locked() -> None:
+    global _config_mtime
     _reset_state_locked()
 
     if not BRIDGE_CONFIG_PATH.exists():
@@ -149,6 +158,10 @@ def _load_config_locked() -> None:
     endpoints = _parse_endpoints(endpoints_raw)
     global _endpoints
     _endpoints = endpoints
+    try:
+        _config_mtime = BRIDGE_CONFIG_PATH.stat().st_mtime
+    except OSError:
+        pass
     print(f"[keyguard] bridge: loaded {len(endpoints)} endpoint(s); "
           f"token will be resolved from keyguard:{BRIDGE_TOKEN_KEYGUARD_KEY} on first use",
           file=sys.stderr)
