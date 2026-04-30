@@ -14,7 +14,9 @@
 #    The token is read from keyguard on the FIRST authenticated bridge call
 #    (one Touch ID prompt per server lifetime), then cached in memory.
 #
-# 3. Reload after editing this file:
+# 3. Save the file - the server hot-reloads on mtime change at the next request.
+#    SIGHUP is still accepted if you want to force a reload + clear the cached
+#    token and rate-limit state:
 #      kill -HUP $(launchctl list | awk '/com.keyguard.server/{print $1}')
 #
 # Usage from a Docker container:

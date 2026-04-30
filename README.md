@@ -159,11 +159,13 @@ Two layers protect the Touch ID prompt from abuse:
 
 ### Reloading config
 
+Saving the YAML file is enough - the server checks the file's mtime on every bridge request and reloads automatically.
+
+To force a reload that also clears the cached token and rate-limit state, send `SIGHUP`:
+
 ```bash
 kill -HUP $(launchctl list | awk '/com.keyguard.server/{print $1}')
 ```
-
-This re-reads the YAML file, clears the cached token, and clears the rate-limit state.
 
 ### Config format
 
