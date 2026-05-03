@@ -6,6 +6,7 @@ LAUNCH_AGENTS      := $(HOME)/Library/LaunchAgents
 LOGS_DIR           := $(HOME)/Library/Logs
 SECRETS_FILE       ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.enc)
 BRIDGE_CONFIG_FILE ?= $(or $(KEYGUARD_BRIDGE_CONFIG_FILE),$(HOME)/.mac-bridge-endpoints.yaml)
+LOG_FILE           ?= $(or $(KEYGUARD_LOG_FILE),$(HOME)/.keyguard/access.log)
 
 BINARY     := $(PREFIX)/bin/keyguard
 SERVER_DIR := $(PREFIX)/lib/keyguard
@@ -35,6 +36,9 @@ help: ## Show available targets
 	@echo ""
 	@echo "  Custom bridge config path:"
 	@echo "    export KEYGUARD_BRIDGE_CONFIG_FILE=/path/to/bridge.yaml"
+	@echo ""
+	@echo "  Custom access log path:"
+	@echo "    export KEYGUARD_LOG_FILE=/path/to/access.log"
 
 build: bin/keyguard ## Compile the Swift binary
 
@@ -59,7 +63,7 @@ install: build ## Install binary, server, and register launchd agent
 	sudo install -m 755 src/keyguard-server.py "$(SERVER)"
 	sudo install -m 644 src/keyguard_server/*.py "$(SERVER_DIR)/keyguard_server/"
 	mkdir -p "$(LAUNCH_AGENTS)" "$(LOGS_DIR)"
-	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g' \
+	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g; s|__LOG_FILE__|$(LOG_FILE)|g' \
 		com.keyguard.server.plist > "$(PLIST)"
 	@echo "Installed. Run 'make start' to start the server."
 

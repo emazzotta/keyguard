@@ -98,9 +98,9 @@ curl http://host.docker.internal:7777/MY_API_TOKEN,PASSWORD  # KEY=value lines
 curl http://host.docker.internal:7777/_keys                  # list all key names
 ```
 
-Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. A macOS notification is displayed for every secret read, showing an ISO timestamp, key names, and source IP with resolved names (reverse DNS hostname and/or Docker container name). Clients can send an `X-Keyguard-Source` header (e.g., the container hostname) to identify themselves — the server resolves it to a container name via `docker inspect` when possible.
+Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. Each secret read appends a line to `~/.keyguard/access.log` with an ISO timestamp, the source IP with resolved names (reverse DNS hostname and/or Docker container name), and the keys read. No GUI notifications - tail the log to watch reads in real time. Clients can send an `X-Keyguard-Source` header (e.g., the container hostname) to identify themselves - the server resolves it to a container name via `docker inspect` when possible.
 
-Optionally, append `?timeout=N` to cache decrypted values in the server's process memory for up to `N` seconds (max 300), reducing repeated Touch ID prompts. Cache entries are scoped to the requesting IP — a different container cannot read another's cache unless explicitly allowed with `?share=all` or `?share=172.17.0.2,172.17.0.3`. Cached reads still trigger a notification marked `(cached)`, and the Touch ID prompt shows the duration for informed consent (`"Reveal TOKEN (cached for 60s)"`). By default there is no caching. Flush with `DELETE /_cache`.
+Optionally, append `?timeout=N` to cache decrypted values in the server's process memory for up to `N` seconds (max 300), reducing repeated Touch ID prompts. Cache entries are scoped to the requesting IP - a different container cannot read another's cache unless explicitly allowed with `?share=all` or `?share=172.17.0.2,172.17.0.3`. Cached reads still write a log line marked `(cached)`, and the Touch ID prompt shows the duration for informed consent (`"Reveal TOKEN (cached for 60s)"`). By default there is no caching. Flush with `DELETE /_cache`.
 
 **Storing a secret from a container (POST):**
 ```bash
@@ -207,7 +207,7 @@ By default every endpoint requires `Authorization: Bearer <MAC_BRIDGE_TOKEN>`. A
 - Suitable for: side-effect-light, non-secret-returning commands you'd be comfortable with anything on the local Docker network triggering — a status ping, a non-confidential notification, a "play/pause" toggle.
 - Unsuitable for: anything that mutates persistent state, reveals secrets, runs external network calls, or that you'd be unhappy seeing called by a compromised container on the same machine.
 - Strict parsing: only the literal YAML boolean `true` opens the gate. `public: "true"` (quoted), `public: 1`, `public: yes-but-no` all stay protected, with a warning logged. Default and missing values are protected.
-- Method whitelist, stdin handling, timeout, and macOS notifications all still apply to public endpoints — `public: true` only relaxes authentication, nothing else.
+- Method whitelist, stdin handling, timeout, and access logging all still apply to public endpoints - `public: true` only relaxes authentication, nothing else.
 
 The `_bridge/list` endpoint is privilege-aware:
 
@@ -255,7 +255,7 @@ curl -s http://host.docker.internal:7777/_bridge/list
 curl -s -H "Authorization: Bearer $TOKEN" http://host.docker.internal:7777/_bridge/list
 ```
 
-Every successful bridge call sends a macOS notification with the endpoint name and caller IP.
+Every successful bridge call appends a line to `~/.keyguard/access.log` with the endpoint name and caller IP. Failed calls are not logged.
 
 ### Security
 
@@ -287,6 +287,32 @@ export KEYGUARD_SECRETS_FILE=~/Dropbox/keyguard/secrets.enc
 
 Set this in your shell profile before running `make install` — the value is baked into the launchd plist automatically so the server always uses the correct path.
 
+## Access log
+
+Every successful secret read and successful bridge call writes one line to `~/.keyguard/access.log`:
+
+```
+2026-05-03T11:45:23Z 172.17.0.5 (my-container) MY_TOKEN
+2026-05-03T11:45:24Z 172.17.0.5 (my-container) MY_TOKEN (cached)
+2026-05-03T11:45:25Z 192.168.65.2 bridge:spotify-play
+```
+
+Format: ISO-8601 UTC timestamp, source (IP plus resolved hostname or container name), comma-separated key list (or `bridge:<name>`), optional `(cached)` marker. Failed reads, list operations, POSTs, and failed bridge calls are not logged.
+
+Tail to watch reads live:
+
+```bash
+tail -f ~/.keyguard/access.log
+```
+
+Rotate, prune, or delete it whenever you want - the server recreates the file on the next write. To override the path:
+
+```bash
+export KEYGUARD_LOG_FILE=~/Library/Logs/keyguard/access.log
+```
+
+Set it before `make install` so the value is baked into the launchd plist.
+
 ## Makefile targets
 
 | Target | Description |
@@ -312,7 +338,7 @@ Set this in your shell profile before running `make install` — the value is ba
 | Process on host reads `secrets.enc` | AES-256-GCM encrypted — unreadable without the key |
 | Process on host reads the encryption key | macOS Keychain ACL — other apps are challenged with a system password prompt |
 | Unauthenticated HTTP request | Touch ID required for every decryption; biometrics only (no password fallback) |
-| Optional cached read without Touch ID | Opt-in per-request (`?timeout=N`), capped at 300s, in-memory only, every read still triggers a macOS notification |
+| Optional cached read without Touch ID | Opt-in per-request (`?timeout=N`), capped at 300s, in-memory only, every read still appends to the access log |
 | Request from another device on the network | Server rejects all IPs outside localhost and Docker subnets |
 | Inline `keyguard set KEY value` | Warning printed to stderr — use the interactive prompt instead |
 | `POST /<name>` from container | Value piped to `keyguard` via stdin — never appears in process args or `ps` |

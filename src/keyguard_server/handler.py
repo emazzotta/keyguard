@@ -7,7 +7,7 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
-from . import bridge, cache, encoding, keyguard_cli, notification
+from . import access_log, bridge, cache, encoding, keyguard_cli
 from .config import (
     MAX_BRIDGE_OUTPUT_BYTES,
     MAX_CACHE_TIMEOUT,
@@ -118,7 +118,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if not timeout:
             result = keyguard_cli.get(*keys)
             if self._respond_cli_or_handle_error(result):
-                notification.notify_async(keys, client_ip, cached=False, source_hint=source_hint)
+                access_log.log_access(keys, client_ip, cached=False, source_hint=source_hint)
             return
 
         share_ips = cache.parse_share(query, client_ip)
@@ -131,7 +131,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if all(v is not None for v in cached_values.values()):
             body = encoding.format_response(keys, cached_values)
             self._respond(200, body.encode())
-            notification.notify_async(keys, client_ip, cached=True, source_hint=source_hint)
+            access_log.log_access(keys, client_ip, cached=True, source_hint=source_hint)
             return
 
         missing = [k for k in keys if cached_values[k] is None]
@@ -146,7 +146,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         all_values = {k: cached_values[k] if cached_values[k] is not None else fresh.get(k) for k in keys}
         body = encoding.format_response(keys, all_values)
         self._respond(200, body.encode())
-        notification.notify_async(keys, client_ip, cached=False, source_hint=source_hint)
+        access_log.log_access(keys, client_ip, cached=False, source_hint=source_hint)
 
     # ---- Bridge handler ----
 
@@ -241,7 +241,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if result.returncode == 0:
             output = result.stdout[:MAX_BRIDGE_OUTPUT_BYTES]
             self._respond(200, output.encode())
-            notification.notify_async([f"bridge:{name}"], client_ip, cached=False)
+            access_log.log_access([f"bridge:{name}"], client_ip, cached=False)
         else:
             error = (result.stderr or result.stdout)[:MAX_BRIDGE_OUTPUT_BYTES]
             self._respond(500, error.encode())

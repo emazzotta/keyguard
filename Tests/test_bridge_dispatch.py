@@ -1,7 +1,10 @@
-"""Bridge: auth, method, endpoint dispatch, command execution, stdin, notifications."""
+"""Bridge: auth, method, endpoint dispatch, command execution, stdin, access logging."""
 import subprocess
 import time
+from pathlib import Path
 from unittest.mock import call, patch
+
+import pytest
 
 from conftest import (
     BRIDGE_TOKEN,
@@ -10,10 +13,24 @@ from conftest import (
     http_bridge_post,
     set_bridge_state,
 )
+from keyguard_server import access_log
 
 
 def _bridge_calls(mock_run):
-    return [c for c in mock_run.call_args_list if c[0][0][0] != "osascript"]
+    return list(mock_run.call_args_list)
+
+
+@pytest.fixture()
+def log_path(tmp_path: Path, monkeypatch) -> Path:
+    path = tmp_path / "access.log"
+    monkeypatch.setattr(access_log, "LOG_PATH", path)
+    return path
+
+
+def _read_log_lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
 # ---- Auth ----
@@ -212,26 +229,23 @@ def test_stdin_true_passes_body(server, configured_bridge):
     assert bridge_calls[0][1]["input"] == "hello stdin"
 
 
-# ---- Notifications ----
+# ---- Access log ----
 
 
-def test_success_sends_notification(server, configured_bridge):
-    with patch("subprocess.run", return_value=cli_run_result(0, stdout="ok")) as mock_run:
+def test_success_writes_access_log_line(server, configured_bridge, log_path):
+    with patch("subprocess.run", return_value=cli_run_result(0, stdout="ok")):
         http_bridge_post(server, "echo", token=BRIDGE_TOKEN)
 
-    time.sleep(0.2)
-    osa = [c for c in mock_run.call_args_list if c[0][0][0] == "osascript"]
-    assert len(osa) == 1
-    assert "bridge:echo" in osa[0][0][0][2]
+    lines = _read_log_lines(log_path)
+    assert len(lines) == 1
+    assert "bridge:echo" in lines[0]
 
 
-def test_failure_does_not_send_notification(server, configured_bridge):
-    with patch("subprocess.run", return_value=cli_run_result(1, stderr="fail")) as mock_run:
+def test_failure_does_not_write_access_log_line(server, configured_bridge, log_path):
+    with patch("subprocess.run", return_value=cli_run_result(1, stderr="fail")):
         http_bridge_post(server, "echo", token=BRIDGE_TOKEN)
 
-    time.sleep(0.2)
-    osa = [c for c in mock_run.call_args_list if c[0][0][0] == "osascript"]
-    assert osa == []
+    assert _read_log_lines(log_path) == []
 
 
 # ---- subprocess kwargs / robustness ----
