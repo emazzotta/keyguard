@@ -91,8 +91,50 @@ def lazy_token_bridge(monkeypatch):
             pass_stdin=False,
             timeout=10,
         ),
+        "public-echo": bridge.Endpoint(
+            command=("/bin/echo", "public"),
+            allowed_methods=frozenset(["POST"]),
+            pass_stdin=False,
+            timeout=10,
+            public=True,
+        ),
     }
     set_bridge_state(monkeypatch, endpoints=endpoints, token="", token_resolved=False)
+
+
+@pytest.fixture()
+def mixed_bridge(monkeypatch):
+    """Bridge with a mix of protected and public endpoints, token pre-resolved."""
+    endpoints = {
+        "private-echo": bridge.Endpoint(
+            command=("/bin/echo", "private"),
+            allowed_methods=frozenset(["POST"]),
+            pass_stdin=False,
+            timeout=10,
+        ),
+        "public-echo": bridge.Endpoint(
+            command=("/bin/echo", "public"),
+            allowed_methods=frozenset(["POST"]),
+            pass_stdin=False,
+            timeout=10,
+            public=True,
+        ),
+        "public-status": bridge.Endpoint(
+            command=("/bin/echo", "ok"),
+            allowed_methods=frozenset(["GET"]),
+            pass_stdin=False,
+            timeout=10,
+            public=True,
+        ),
+        "public-stdin": bridge.Endpoint(
+            command=("/bin/cat",),
+            allowed_methods=frozenset(["POST"]),
+            pass_stdin=True,
+            timeout=10,
+            public=True,
+        ),
+    }
+    set_bridge_state(monkeypatch, endpoints=endpoints, token=BRIDGE_TOKEN, token_resolved=True)
 
 
 # ---------------------------------------------------------------------------

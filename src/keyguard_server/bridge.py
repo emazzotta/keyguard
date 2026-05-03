@@ -30,6 +30,7 @@ class Endpoint:
     allowed_methods: frozenset[str]
     pass_stdin: bool
     timeout: int
+    public: bool = False
 
 
 _endpoints: dict[str, Endpoint] = {}
@@ -57,15 +58,26 @@ def get_endpoint(name: str) -> Endpoint | None:
     return _endpoints.get(name)
 
 
-def list_endpoints() -> list[dict]:
-    """Return public metadata for all configured endpoints, sorted by name.
+def list_endpoints(public_only: bool = False) -> list[dict]:
+    """Return metadata for configured endpoints, sorted by name.
 
     Command is intentionally omitted - callers need to know what they can call,
-    not the underlying implementation.
+    not the underlying implementation. The `public` flag tells callers which
+    endpoints can be invoked without an Authorization header.
+
+    When `public_only=True`, only endpoints with `public: true` are returned -
+    used by the handler to give anonymous callers a discovery view that does
+    not leak the existence of protected endpoints.
     """
     return [
-        {"name": name, "methods": sorted(ep.allowed_methods), "timeout": ep.timeout}
+        {
+            "name": name,
+            "methods": sorted(ep.allowed_methods),
+            "timeout": ep.timeout,
+            "public": ep.public,
+        }
         for name, ep in sorted(_endpoints.items())
+        if not public_only or ep.public
     ]
 
 
@@ -203,7 +215,26 @@ def _parse_endpoint(name: str, spec: object) -> Endpoint | None:
         allowed_methods=_parse_methods(spec.get("method", "POST")),
         pass_stdin=bool(spec.get("stdin", False)),
         timeout=_parse_timeout(spec.get("timeout", SUBPROCESS_TIMEOUT)),
+        public=_parse_public(name, spec.get("public", False)),
     )
+
+
+def _parse_public(name: str, value: object) -> bool:
+    """Strict parse of the `public` flag. Only the literal YAML boolean `true`
+    opens an endpoint; any other value (string, number, missing) keeps it
+    protected. Security-relevant: a typo like `public: "true"` must not silently
+    drop authentication.
+    """
+    if value is False or value is None:
+        return False
+    if value is True:
+        return True
+    print(
+        f"[keyguard] bridge: endpoint '{name}' has non-boolean 'public' value "
+        f"({value!r}); treating as protected. Use 'public: true' to disable auth.",
+        file=sys.stderr,
+    )
+    return False
 
 
 def _parse_timeout(value: object) -> int:

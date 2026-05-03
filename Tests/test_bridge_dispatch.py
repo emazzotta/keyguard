@@ -65,20 +65,43 @@ def test_list_includes_methods_and_timeout(server, configured_bridge):
     assert by_name["echo"]["timeout"] == 10
 
 
+def test_list_includes_public_flag_for_each_entry(server, configured_bridge):
+    _, body = http_bridge_get(server, "list", token=BRIDGE_TOKEN)
+    endpoints = __import__("json").loads(body)
+    for entry in endpoints:
+        assert "public" in entry
+        assert entry["public"] is False
+
+
 def test_list_does_not_expose_command(server, configured_bridge):
     _, body = http_bridge_get(server, "list", token=BRIDGE_TOKEN)
     assert "command" not in body
     assert "/bin/echo" not in body
 
 
-def test_list_requires_auth(server, configured_bridge):
-    status, _ = http_bridge_get(server, "list", token=None)
-    assert status == 401
+def test_list_without_auth_returns_only_public_endpoints(server, configured_bridge):
+    """Anonymous listing reveals only public endpoints. configured_bridge has none,
+    so the list is empty - protected endpoints are not leaked to anonymous callers.
+    """
+    status, body = http_bridge_get(server, "list", token=None)
+    assert status == 200
+    assert __import__("json").loads(body) == []
 
 
-def test_list_rejects_wrong_token(server, configured_bridge):
-    status, _ = http_bridge_get(server, "list", token="bad-token")
-    assert status == 401
+def test_list_with_wrong_token_returns_only_public_endpoints(server, configured_bridge):
+    status, body = http_bridge_get(server, "list", token="garbage")
+    assert status == 200
+    assert __import__("json").loads(body) == []
+
+
+def test_list_without_bearer_does_not_invoke_keyguard(server, lazy_token_bridge):
+    """Anonymous list must never trigger Touch ID, even when a token has not been resolved yet."""
+    with patch("subprocess.run") as mock_run:
+        status, _ = http_bridge_get(server, "list", token=None)
+
+    assert status == 200
+    keyguard_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "/usr/local/bin/keyguard"]
+    assert keyguard_calls == []
 
 
 def test_list_returns_sorted_names(server, configured_bridge):

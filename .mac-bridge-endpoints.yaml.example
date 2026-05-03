@@ -28,6 +28,11 @@
 #   method    GET | POST | [GET, POST]  (default: POST)
 #   stdin     true | false  - pipe POST body to the command's stdin (default: false)
 #   timeout   seconds before the command is killed (default: 60)
+#   public    true | false  - if true, no Authorization header is required for
+#             this endpoint. The IP allowlist remains the only gate. Default is
+#             false; only the literal YAML boolean `true` opens the gate (a
+#             quoted "true" or a number stays protected). Use sparingly for
+#             side-effect-light, non-secret-returning commands.
 
 endpoints:
   spotify-play:
@@ -56,3 +61,11 @@ endpoints:
   #   command: [/usr/bin/say]
   #   method: POST
   #   stdin: true
+
+  # Example: a public endpoint - callable without an Authorization header.
+  # Only do this for commands you would be comfortable being triggered by
+  # anything that can reach the server (i.e. anything inside the IP allowlist).
+  # ping:
+  #   command: [/usr/bin/true]
+  #   method: GET
+  #   public: true

@@ -157,24 +157,9 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(501, b"Bridge not configured")
             return
 
-        # Reject malformed/missing Authorization headers BEFORE keyguard is touched.
-        # This prevents unauthenticated callers from spamming Touch ID prompts.
-        auth = self.headers.get("Authorization")
-        if not auth or not auth.startswith("Bearer "):
-            self._respond(401, b"Unauthorized")
-            return
-
-        token_error = bridge.ensure_token()
-        if token_error is not None:
-            self._respond(503, token_error.encode())
-            return
-
-        if not bridge.verify_token(auth):
-            self._respond(401, b"Unauthorized")
-            return
-
         if name == _BRIDGE_LIST:
-            payload = json.dumps(bridge.list_endpoints()).encode()
+            show_all = self._caller_can_see_all_endpoints()
+            payload = json.dumps(bridge.list_endpoints(public_only=not show_all)).encode()
             self._respond(200, payload, content_type="application/json")
             return
 
@@ -183,11 +168,55 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(404, b"Unknown bridge endpoint")
             return
 
+        if not endpoint.public and not self._authorize_bridge():
+            return
+
         if method not in endpoint.allowed_methods:
             self._respond(405, b"Method not allowed")
             return
 
         self._execute_bridge(name, endpoint, body)
+
+    def _caller_can_see_all_endpoints(self) -> bool:
+        """Listing is privilege-aware: a valid bearer token reveals every
+        endpoint, anonymous (or wrong-token) callers see only the public ones.
+
+        Callers without a Bearer header never trigger keyguard - the listing
+        falls back to public-only without burning a Touch ID prompt. A bearer
+        header is treated as a signal that the caller wants the full list and
+        is willing to pay the token-resolution cost; if resolution fails
+        (rate-limit, Touch ID denied, key missing) the caller still gets a
+        useful public-only listing rather than a 503.
+        """
+        auth = self.headers.get("Authorization")
+        if not auth or not auth.startswith("Bearer "):
+            return False
+        if bridge.ensure_token() is not None:
+            return False
+        return bridge.verify_token(auth)
+
+    def _authorize_bridge(self) -> bool:
+        """Run the bearer-token gate for protected endpoints. Returns True iff the
+        caller is authenticated; otherwise emits the response and returns False.
+
+        Reject malformed/missing Authorization headers BEFORE keyguard is touched
+        so unauthenticated callers cannot spam Touch ID prompts.
+        """
+        auth = self.headers.get("Authorization")
+        if not auth or not auth.startswith("Bearer "):
+            self._respond(401, b"Unauthorized")
+            return False
+
+        token_error = bridge.ensure_token()
+        if token_error is not None:
+            self._respond(503, token_error.encode())
+            return False
+
+        if not bridge.verify_token(auth):
+            self._respond(401, b"Unauthorized")
+            return False
+
+        return True
 
     def _execute_bridge(self, name: str, endpoint: bridge.Endpoint, body: str) -> None:
         stdin_data = body if endpoint.pass_stdin else None

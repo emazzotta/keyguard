@@ -77,6 +77,72 @@ def test_stdin_default_is_false(yaml_config):
     assert bridge.get_endpoint("hello").pass_stdin is False
 
 
+# ---- public flag (auth bypass for explicitly opted-in endpoints) ----
+
+
+def test_public_default_is_false(yaml_config):
+    yaml_config("""
+        endpoints:
+          hello:
+            command: [/bin/echo, hi]
+    """)
+    assert bridge.get_endpoint("hello").public is False
+
+
+def test_public_true_disables_auth(yaml_config):
+    yaml_config("""
+        endpoints:
+          open:
+            command: [/bin/echo, hi]
+            public: true
+    """)
+    assert bridge.get_endpoint("open").public is True
+
+
+def test_public_false_explicit(yaml_config):
+    yaml_config("""
+        endpoints:
+          closed:
+            command: [/bin/echo, hi]
+            public: false
+    """)
+    assert bridge.get_endpoint("closed").public is False
+
+
+def test_public_string_is_treated_as_protected(yaml_config):
+    """Defence against the 'public: "true"' footgun. Only a real YAML boolean opens the gate."""
+    yaml_config("""
+        endpoints:
+          ambiguous:
+            command: [/bin/echo, hi]
+            public: "true"
+    """)
+    assert bridge.get_endpoint("ambiguous").public is False
+
+
+def test_public_number_is_treated_as_protected(yaml_config):
+    yaml_config("""
+        endpoints:
+          numeric:
+            command: [/bin/echo, hi]
+            public: 1
+    """)
+    assert bridge.get_endpoint("numeric").public is False
+
+
+def test_mixed_public_and_protected_endpoints_coexist(yaml_config):
+    yaml_config("""
+        endpoints:
+          private-cmd:
+            command: [/bin/echo, hi]
+          public-cmd:
+            command: [/bin/echo, hi]
+            public: true
+    """)
+    assert bridge.get_endpoint("private-cmd").public is False
+    assert bridge.get_endpoint("public-cmd").public is True
+
+
 def test_command_args_coerced_to_strings(yaml_config):
     yaml_config("""
         endpoints:
