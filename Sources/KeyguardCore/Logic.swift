@@ -44,32 +44,42 @@ public func serializeEnv(_ entries: [String: String]) -> String {
 public struct ParsedArgs {
     public let positional: [String]
     public let cacheDuration: Int?
+    public let purpose: String?
 
-    public init(positional: [String], cacheDuration: Int?) {
+    public init(positional: [String], cacheDuration: Int?, purpose: String? = nil) {
         self.positional = positional
         self.cacheDuration = cacheDuration
+        self.purpose = purpose
     }
 }
 
 public func parseArgs(_ args: [String]) -> ParsedArgs {
     var positional: [String] = []
     var cacheDuration: Int?
+    var purpose: String?
     var i = 0
     while i < args.count {
         if args[i] == "--cache-duration", i + 1 < args.count, let duration = Int(args[i + 1]) {
             cacheDuration = duration
+            i += 2
+        } else if args[i] == "--purpose", i + 1 < args.count {
+            purpose = args[i + 1]
             i += 2
         } else {
             positional.append(args[i])
             i += 1
         }
     }
-    return ParsedArgs(positional: positional, cacheDuration: cacheDuration)
+    return ParsedArgs(positional: positional, cacheDuration: cacheDuration, purpose: purpose)
 }
 
-public func buildReason(base: String, cacheDuration: Int?) -> String {
-    guard let duration = cacheDuration else { return base }
-    return "\(base) (cached for \(duration)s)"
+public func buildReason(base: String, cacheDuration: Int?, purpose: String? = nil) -> String {
+    var reason = base
+    if let purpose, !purpose.isEmpty {
+        reason += " for \(purpose)"
+    }
+    guard let duration = cacheDuration else { return reason }
+    return "\(reason) (cached for \(duration)s)"
 }
 
 public func setSecretReason(name: String, exists: Bool) -> String {

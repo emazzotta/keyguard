@@ -41,10 +41,12 @@ def _run(args: list[str], stdin_value: str | None = None) -> CliResult:
     return CliResult(rc=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
 
-def get(*keys: str, cache_duration: int | None = None) -> CliResult:
+def get(*keys: str, cache_duration: int | None = None, purpose: str | None = None) -> CliResult:
     args = ["get", *keys]
     if cache_duration:
         args += ["--cache-duration", str(cache_duration)]
+    if purpose:
+        args += ["--purpose", purpose]
     return _run(args)
 
 

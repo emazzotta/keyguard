@@ -100,14 +100,18 @@ def _config_stale() -> bool:
         return False
 
 
-def ensure_token() -> str | None:
+def ensure_token(purpose: str | None = None) -> str | None:
     """Resolve the bridge token from keyguard if not already cached.
     Returns None on success (token stored in module state), error message on failure.
+
+    `purpose` names what the token is being resolved for and is shown in the
+    Touch ID prompt, so approving it is an informed decision rather than a bare
+    "Reveal MAC_BRIDGE_TOKEN".
     """
     if _token_resolved:
         return None
     with _token_lock:
-        return _resolve_token_locked()
+        return _resolve_token_locked(purpose)
 
 
 def verify_token(auth_header: str | None) -> bool:
@@ -259,7 +263,7 @@ def _parse_methods(spec: object) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_token_locked() -> str | None:
+def _resolve_token_locked(purpose: str | None = None) -> str | None:
     global _token, _token_resolved, _token_last_attempt
 
     if _token_resolved:
@@ -270,7 +274,7 @@ def _resolve_token_locked() -> str | None:
         return cooldown_error
     _token_last_attempt = time.monotonic()
 
-    result = keyguard_cli.get(BRIDGE_TOKEN_KEYGUARD_KEY)
+    result = keyguard_cli.get(BRIDGE_TOKEN_KEYGUARD_KEY, purpose=purpose)
     if result.timed_out:
         return "keyguard timed out while resolving bridge token"
     if result.not_found:

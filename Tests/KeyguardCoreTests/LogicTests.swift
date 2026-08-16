@@ -68,13 +68,14 @@ struct TestRunner {
         checkDict("round-trip multiline",  parseEnv(serializeEnv(["JSON": multiLineJson, "PLAIN": "hello"])),
                                            ["JSON": multiLineJson, "PLAIN": "hello"])
 
-        func checkArgs(_ desc: String, _ actual: ParsedArgs, positional: [String], cacheDuration: Int?) {
+        func checkArgs(_ desc: String, _ actual: ParsedArgs, positional: [String], cacheDuration: Int?, purpose: String? = nil) {
             let posOk = actual.positional == positional
             let cacheOk = actual.cacheDuration == cacheDuration
-            if posOk && cacheOk {
+            let purposeOk = actual.purpose == purpose
+            if posOk && cacheOk && purposeOk {
                 print("  ✓ \(desc)")
             } else {
-                print("  ✗ \(desc): got positional=\(actual.positional) cache=\(String(describing: actual.cacheDuration)), want positional=\(positional) cache=\(String(describing: cacheDuration))")
+                print("  ✗ \(desc): got positional=\(actual.positional) cache=\(String(describing: actual.cacheDuration)) purpose=\(String(describing: actual.purpose)), want positional=\(positional) cache=\(String(describing: cacheDuration)) purpose=\(String(describing: purpose))")
                 failures += 1
             }
         }
@@ -89,11 +90,20 @@ struct TestRunner {
         checkArgs("missing duration value",     parseArgs(["--cache-duration"]),            positional: ["--cache-duration"], cacheDuration: nil)
         checkArgs("zero duration",              parseArgs(["--cache-duration", "0"]),       positional: [],              cacheDuration: 0)
         checkArgs("negative duration",          parseArgs(["--cache-duration", "-5"]),      positional: [],              cacheDuration: -5)
+        checkArgs("purpose at end",             parseArgs(["KEY", "--purpose", "bridge endpoint x"]), positional: ["KEY"], cacheDuration: nil, purpose: "bridge endpoint x")
+        checkArgs("purpose at start",           parseArgs(["--purpose", "listing", "KEY"]), positional: ["KEY"],         cacheDuration: nil, purpose: "listing")
+        checkArgs("purpose alongside duration", parseArgs(["KEY", "--purpose", "x", "--cache-duration", "60"]), positional: ["KEY"], cacheDuration: 60, purpose: "x")
+        checkArgs("missing purpose value",      parseArgs(["--purpose"]),                   positional: ["--purpose"],   cacheDuration: nil, purpose: nil)
 
         print("\nbuildReason")
         checkStr("without cache",  buildReason(base: "List secrets", cacheDuration: nil),  "List secrets")
         checkStr("with cache",     buildReason(base: "List secrets", cacheDuration: 120),  "List secrets (cached for 120s)")
         checkStr("with zero",      buildReason(base: "Reveal TOKEN", cacheDuration: 0),    "Reveal TOKEN (cached for 0s)")
+        checkStr("with purpose",   buildReason(base: "Reveal MAC_BRIDGE_TOKEN", cacheDuration: nil, purpose: "bridge endpoint resolve-mcp-start"),
+                                   "Reveal MAC_BRIDGE_TOKEN for bridge endpoint resolve-mcp-start")
+        checkStr("purpose before cache suffix", buildReason(base: "Reveal TOKEN", cacheDuration: 60, purpose: "bridge endpoint echo"),
+                                   "Reveal TOKEN for bridge endpoint echo (cached for 60s)")
+        checkStr("empty purpose ignored", buildReason(base: "Reveal TOKEN", cacheDuration: nil, purpose: ""), "Reveal TOKEN")
 
         print("\nsetSecretReason")
         checkStr("new key uses Add",          setSecretReason(name: "API_TOKEN", exists: false), "Add API_TOKEN")

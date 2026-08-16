@@ -426,11 +426,11 @@ case "mv", "rename":
     renameSecret(from: positional[0], to: positional[1], force: force)
 
 case "get":
-    guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }
+    guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--purpose TEXT]\n", stderr); exit(1) }
     let parsed = parseArgs(Array(args[2...]))
     let keys = parsed.positional
-    guard !keys.isEmpty else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]\n", stderr); exit(1) }
-    let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))", cacheDuration: parsed.cacheDuration)
+    guard !keys.isEmpty else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--purpose TEXT]\n", stderr); exit(1) }
+    let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))", cacheDuration: parsed.cacheDuration, purpose: parsed.purpose)
     let env = parseEnv(decrypt(reason: reason))
     let missing = keys.filter { env[$0] == nil }
     if !missing.isEmpty {

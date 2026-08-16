@@ -168,7 +168,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(404, b"Unknown bridge endpoint")
             return
 
-        if not endpoint.public and not self._authorize_bridge():
+        if not endpoint.public and not self._authorize_bridge(name):
             return
 
         if method not in endpoint.allowed_methods:
@@ -191,11 +191,11 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization")
         if not auth or not auth.startswith("Bearer "):
             return False
-        if bridge.ensure_token() is not None:
+        if bridge.ensure_token("bridge endpoint listing") is not None:
             return False
         return bridge.verify_token(auth)
 
-    def _authorize_bridge(self) -> bool:
+    def _authorize_bridge(self, name: str) -> bool:
         """Run the bearer-token gate for protected endpoints. Returns True iff the
         caller is authenticated; otherwise emits the response and returns False.
 
@@ -207,7 +207,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(401, b"Unauthorized")
             return False
 
-        token_error = bridge.ensure_token()
+        token_error = bridge.ensure_token(f"bridge endpoint {name}")
         if token_error is not None:
             self._respond(503, token_error.encode())
             return False

@@ -64,9 +64,10 @@ keyguard set MY_API_TOKEN
 ```bash
 keyguard get MY_API_TOKEN                    # returns raw value
 keyguard get MY_API_TOKEN PASSWORD DB_URL    # returns KEY=value lines
+keyguard get MY_API_TOKEN --purpose "deploy" # names the caller in the prompt
 ```
 
-Touch ID prompt shows exactly what is being revealed: `"Reveal MY_API_TOKEN, PASSWORD, DB_URL"`.
+Touch ID prompt shows exactly what is being revealed: `"Reveal MY_API_TOKEN, PASSWORD, DB_URL"`. `--purpose` appends what the secret is wanted for, so approving is an informed decision rather than a bare key name: `"Reveal MY_API_TOKEN for deploy"`.
 
 **Other commands (all require Touch ID):**
 ```bash
@@ -151,6 +152,8 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))" \
 That's the entire token setup. The YAML config only contains endpoint definitions.
 
 The server reads `MAC_BRIDGE_TOKEN` from keyguard on the **first authenticated bridge request** (lazy load) — one Touch ID prompt per server lifetime, then cached in process memory. Send `SIGHUP` to force a re-resolve.
+
+That prompt names the endpoint that triggered it — `"Reveal MAC_BRIDGE_TOKEN for bridge endpoint resolve-mcp-start"`, or `"… for bridge endpoint listing"` when it came from `_bridge/list` — so you are approving a specific command, not an anonymous token read. The name comes from the config, since unknown endpoints 404 before the token is ever resolved.
 
 Two layers protect the Touch ID prompt from abuse:
 

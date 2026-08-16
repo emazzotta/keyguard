@@ -2,7 +2,7 @@
 import http.client
 from unittest.mock import patch
 
-from conftest import BRIDGE_TOKEN, cli_run_result, http_bridge_post
+from conftest import BRIDGE_TOKEN, cli_run_result, http_bridge_get, http_bridge_post
 from keyguard_server import bridge
 
 
@@ -31,7 +31,10 @@ def test_token_resolved_from_keyguard_on_first_request(server, lazy_token_bridge
     assert body == "ok"
     calls = _keyguard_calls(mock_run)
     assert len(calls) == 1
-    assert calls[0][0][0] == ["/usr/local/bin/keyguard", "get", "MAC_BRIDGE_TOKEN"]
+    assert calls[0][0][0] == [
+        "/usr/local/bin/keyguard", "get", "MAC_BRIDGE_TOKEN",
+        "--purpose", "bridge endpoint echo",
+    ]
 
 
 def test_token_cached_after_first_resolution(server, lazy_token_bridge):
@@ -142,3 +145,35 @@ def test_verify_token_none_header(monkeypatch):
 def test_verify_token_empty_server_token(monkeypatch):
     monkeypatch.setattr(bridge, "_token", "")
     assert bridge.verify_token("Bearer anything") is False
+
+
+# ---- Touch ID prompt names what it is being asked to approve ----
+
+
+def test_should_name_the_triggering_endpoint_in_the_touch_id_purpose(server, lazy_token_bridge):
+    with patch("subprocess.run", side_effect=_route_keyguard()) as mock_run:
+        http_bridge_post(server, "echo", token=BRIDGE_TOKEN)
+
+    argv = _keyguard_calls(mock_run)[0][0][0]
+
+    assert argv[-2:] == ["--purpose", "bridge endpoint echo"]
+
+
+def test_should_name_the_listing_rather_than_an_endpoint_when_prompted_by_bridge_list(
+    server, lazy_token_bridge
+):
+    with patch("subprocess.run", side_effect=_route_keyguard()) as mock_run:
+        http_bridge_get(server, "list", token=BRIDGE_TOKEN)
+
+    argv = _keyguard_calls(mock_run)[0][0][0]
+
+    assert argv[-2:] == ["--purpose", "bridge endpoint listing"]
+
+
+def test_should_not_prompt_for_a_public_endpoint(server, lazy_token_bridge):
+    """A public endpoint skips the token entirely, so no prompt is raised at all."""
+    with patch("subprocess.run", side_effect=_route_keyguard()) as mock_run:
+        status, _ = http_bridge_post(server, "public-echo", token=None)
+
+    assert status == 200
+    assert _keyguard_calls(mock_run) == []
