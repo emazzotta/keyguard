@@ -191,7 +191,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization")
         if not auth or not auth.startswith("Bearer "):
             return False
-        if bridge.ensure_token("bridge endpoint listing") is not None:
+        if bridge.ensure_token() is not None:
             return False
         return bridge.verify_token(auth)
 
@@ -207,7 +207,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(401, b"Unauthorized")
             return False
 
-        token_error = bridge.ensure_token(f"bridge endpoint {name}")
+        token_error = bridge.ensure_token(name)
         if token_error is not None:
             self._respond(503, token_error.encode())
             return False

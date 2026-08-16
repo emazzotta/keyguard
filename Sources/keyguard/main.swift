@@ -15,6 +15,22 @@ let SECRETS_FILE: URL = {
         .appendingPathComponent(".keyguard/secrets.enc")
 }()
 
+// Mirrors keyguard_server.config.BRIDGE_CONFIG_PATH - the CLI confirms a claimed
+// endpoint against the same file the server dispatches from, so the prompt can
+// only ever name a command that is actually configured.
+let BRIDGE_CONFIG_FILE: URL = {
+    if let custom = ProcessInfo.processInfo.environment["KEYGUARD_BRIDGE_CONFIG_FILE"] {
+        return URL(fileURLWithPath: NSString(string: custom).expandingTildeInPath)
+    }
+    return FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".mac-bridge-endpoints.yaml")
+}()
+
+func configuredBridgeEndpointNames() -> Set<String> {
+    guard let contents = try? String(contentsOf: BRIDGE_CONFIG_FILE, encoding: .utf8) else { return [] }
+    return parseBridgeEndpointNames(contents)
+}
+
 func authenticate(reason: String) {
     let context = LAContext()
     var error: NSError?
@@ -426,11 +442,14 @@ case "mv", "rename":
     renameSecret(from: positional[0], to: positional[1], force: force)
 
 case "get":
-    guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--purpose TEXT]\n", stderr); exit(1) }
+    guard args.count >= 3 else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--bridge-endpoint NAME]\n", stderr); exit(1) }
     let parsed = parseArgs(Array(args[2...]))
     let keys = parsed.positional
-    guard !keys.isEmpty else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--purpose TEXT]\n", stderr); exit(1) }
-    let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))", cacheDuration: parsed.cacheDuration, purpose: parsed.purpose)
+    guard !keys.isEmpty else { fputs("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--bridge-endpoint NAME]\n", stderr); exit(1) }
+    let purpose = parsed.bridgeEndpoint.flatMap {
+        bridgePurpose(endpoint: $0, configuredNames: configuredBridgeEndpointNames())
+    }
+    let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))", cacheDuration: parsed.cacheDuration, purpose: purpose)
     let env = parseEnv(decrypt(reason: reason))
     let missing = keys.filter { env[$0] == nil }
     if !missing.isEmpty {

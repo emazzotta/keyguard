@@ -64,10 +64,9 @@ keyguard set MY_API_TOKEN
 ```bash
 keyguard get MY_API_TOKEN                    # returns raw value
 keyguard get MY_API_TOKEN PASSWORD DB_URL    # returns KEY=value lines
-keyguard get MY_API_TOKEN --purpose "deploy" # names the caller in the prompt
 ```
 
-Touch ID prompt shows exactly what is being revealed: `"Reveal MY_API_TOKEN, PASSWORD, DB_URL"`. `--purpose` appends what the secret is wanted for, so approving is an informed decision rather than a bare key name: `"Reveal MY_API_TOKEN for deploy"`.
+Touch ID prompt shows exactly what is being revealed: `"Reveal MY_API_TOKEN, PASSWORD, DB_URL"`.
 
 **Other commands (all require Touch ID):**
 ```bash
@@ -153,7 +152,9 @@ That's the entire token setup. The YAML config only contains endpoint definition
 
 The server reads `MAC_BRIDGE_TOKEN` from keyguard on the **first authenticated bridge request** (lazy load) — one Touch ID prompt per server lifetime, then cached in process memory. Send `SIGHUP` to force a re-resolve.
 
-That prompt names the endpoint that triggered it — `"Reveal MAC_BRIDGE_TOKEN for bridge endpoint resolve-mcp-start"`, or `"… for bridge endpoint listing"` when it came from `_bridge/list` — so you are approving a specific command, not an anonymous token read. The name comes from the config, since unknown endpoints 404 before the token is ever resolved.
+That prompt names the endpoint that triggered it — `"Reveal MAC_BRIDGE_TOKEN for bridge endpoint resolve-mcp-start"` — so you approve a specific command rather than an anonymous token read.
+
+The name is **verified, not asserted**. The server passes only a bare key via `keyguard get MAC_BRIDGE_TOKEN --bridge-endpoint <name>`, and the CLI itself looks that name up in `~/.mac-bridge-endpoints.yaml` before it will show it. A name that is not a configured endpoint, or that is anything other than an identifier (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`), is silently dropped and you get the bare `"Reveal MAC_BRIDGE_TOKEN"` instead. So the flag cannot be used to dress a token read up as something reassuring — nothing calling the CLI can put its own words in the dialog, and the prompt never claims an endpoint it has not confirmed. Reads triggered by `_bridge/list` dispatch no endpoint and therefore name none.
 
 Two layers protect the Touch ID prompt from abuse:
 

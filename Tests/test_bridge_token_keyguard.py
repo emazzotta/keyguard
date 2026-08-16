@@ -33,7 +33,7 @@ def test_token_resolved_from_keyguard_on_first_request(server, lazy_token_bridge
     assert len(calls) == 1
     assert calls[0][0][0] == [
         "/usr/local/bin/keyguard", "get", "MAC_BRIDGE_TOKEN",
-        "--purpose", "bridge endpoint echo",
+        "--bridge-endpoint", "echo",
     ]
 
 
@@ -150,24 +150,52 @@ def test_verify_token_empty_server_token(monkeypatch):
 # ---- Touch ID prompt names what it is being asked to approve ----
 
 
-def test_should_name_the_triggering_endpoint_in_the_touch_id_purpose(server, lazy_token_bridge):
+def test_should_pass_the_triggering_endpoint_name_to_the_touch_id_prompt(server, lazy_token_bridge):
     with patch("subprocess.run", side_effect=_route_keyguard()) as mock_run:
         http_bridge_post(server, "echo", token=BRIDGE_TOKEN)
 
     argv = _keyguard_calls(mock_run)[0][0][0]
 
-    assert argv[-2:] == ["--purpose", "bridge endpoint echo"]
+    assert argv[-2:] == ["--bridge-endpoint", "echo"]
 
 
-def test_should_name_the_listing_rather_than_an_endpoint_when_prompted_by_bridge_list(
+def test_should_pass_a_bare_name_the_cli_can_verify_rather_than_prompt_prose(
     server, lazy_token_bridge
 ):
+    """The server sends only the endpoint key. The prompt wording is the CLI's to
+    build after confirming that key against the config, so nothing on this side
+    can dictate what the dialog says."""
+    with patch("subprocess.run", side_effect=_route_keyguard()) as mock_run:
+        http_bridge_post(server, "echo", token=BRIDGE_TOKEN)
+
+    argv = _keyguard_calls(mock_run)[0][0][0]
+
+    assert argv[-1] == "echo"
+    assert not any(" " in arg for arg in argv)
+
+
+def test_should_not_claim_an_endpoint_when_the_prompt_comes_from_bridge_list(
+    server, lazy_token_bridge
+):
+    """Listing dispatches no endpoint, so it must not name one."""
     with patch("subprocess.run", side_effect=_route_keyguard()) as mock_run:
         http_bridge_get(server, "list", token=BRIDGE_TOKEN)
 
     argv = _keyguard_calls(mock_run)[0][0][0]
 
-    assert argv[-2:] == ["--purpose", "bridge endpoint listing"]
+    assert "--bridge-endpoint" not in argv
+
+
+def test_should_never_reach_keyguard_for_an_endpoint_absent_from_the_config(
+    server, lazy_token_bridge
+):
+    """An unknown name 404s before token resolution, so only configured names can
+    ever be handed to the prompt."""
+    with patch("subprocess.run", side_effect=_route_keyguard()) as mock_run:
+        status, _ = http_bridge_post(server, "not-configured", token=BRIDGE_TOKEN)
+
+    assert status == 404
+    assert _keyguard_calls(mock_run) == []
 
 
 def test_should_not_prompt_for_a_public_endpoint(server, lazy_token_bridge):

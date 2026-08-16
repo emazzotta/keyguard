@@ -44,33 +44,93 @@ public func serializeEnv(_ entries: [String: String]) -> String {
 public struct ParsedArgs {
     public let positional: [String]
     public let cacheDuration: Int?
-    public let purpose: String?
+    public let bridgeEndpoint: String?
 
-    public init(positional: [String], cacheDuration: Int?, purpose: String? = nil) {
+    public init(positional: [String], cacheDuration: Int?, bridgeEndpoint: String? = nil) {
         self.positional = positional
         self.cacheDuration = cacheDuration
-        self.purpose = purpose
+        self.bridgeEndpoint = bridgeEndpoint
     }
 }
 
 public func parseArgs(_ args: [String]) -> ParsedArgs {
     var positional: [String] = []
     var cacheDuration: Int?
-    var purpose: String?
+    var bridgeEndpoint: String?
     var i = 0
     while i < args.count {
         if args[i] == "--cache-duration", i + 1 < args.count, let duration = Int(args[i + 1]) {
             cacheDuration = duration
             i += 2
-        } else if args[i] == "--purpose", i + 1 < args.count {
-            purpose = args[i + 1]
+        } else if args[i] == "--bridge-endpoint", i + 1 < args.count {
+            bridgeEndpoint = args[i + 1]
             i += 2
         } else {
             positional.append(args[i])
             i += 1
         }
     }
-    return ParsedArgs(positional: positional, cacheDuration: cacheDuration, purpose: purpose)
+    return ParsedArgs(positional: positional, cacheDuration: cacheDuration, bridgeEndpoint: bridgeEndpoint)
+}
+
+private let bridgeEndpointNameCharacters = CharacterSet(charactersIn:
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+private let maxBridgeEndpointNameLength = 64
+
+/// Endpoint names are identifiers, never prose - so a caller cannot dress a
+/// token read up as reassuring text in the Touch ID prompt.
+public func isValidBridgeEndpointName(_ name: String) -> Bool {
+    guard !name.isEmpty, name.count <= maxBridgeEndpointNameLength else { return false }
+    guard name.unicodeScalars.allSatisfy(bridgeEndpointNameCharacters.contains) else { return false }
+    guard let first = name.first else { return false }
+    return first.isLetter || first.isNumber
+}
+
+private func endpointKey(fromTrimmed line: String) -> String? {
+    guard let colon = line.firstIndex(of: ":") else { return nil }
+    var key = String(line[line.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
+    let quoted = (key.hasPrefix("\"") && key.hasSuffix("\"")) || (key.hasPrefix("'") && key.hasSuffix("'"))
+    if key.count >= 2, quoted {
+        key = String(key.dropFirst().dropLast())
+    }
+    return isValidBridgeEndpointName(key) ? key : nil
+}
+
+/// Top-level keys of the bridge config's `endpoints:` mapping, scanned without a
+/// YAML library. Deliberately conservative: anything it cannot read confidently
+/// yields an empty set, which downgrades the prompt to its bare form rather than
+/// asserting an endpoint it has not actually confirmed.
+public func parseBridgeEndpointNames(_ yaml: String) -> Set<String> {
+    var names: Set<String> = []
+    var childIndent: Int?
+    var inEndpoints = false
+
+    for line in yaml.components(separatedBy: .newlines) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+        if line.contains("\t") { return [] }
+
+        let indent = line.prefix(while: { $0 == " " }).count
+        if !inEndpoints {
+            if indent == 0, trimmed == "endpoints:" { inEndpoints = true }
+            continue
+        }
+        if indent == 0 { break }
+
+        if let expected = childIndent, indent != expected { continue }
+        childIndent = indent
+        if let name = endpointKey(fromTrimmed: trimmed) {
+            names.insert(name)
+        }
+    }
+    return names
+}
+
+/// The prompt qualifier for a bridge-triggered token read, or nil when the name
+/// is not a confirmed endpoint - never a caller-supplied string.
+public func bridgePurpose(endpoint: String, configuredNames: Set<String>) -> String? {
+    guard isValidBridgeEndpointName(endpoint), configuredNames.contains(endpoint) else { return nil }
+    return "bridge endpoint \(endpoint)"
 }
 
 public func buildReason(base: String, cacheDuration: Int?, purpose: String? = nil) -> String {
