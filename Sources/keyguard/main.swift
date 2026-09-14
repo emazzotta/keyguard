@@ -31,6 +31,31 @@ func configuredBridgeEndpointNames() -> Set<String> {
     return parseBridgeEndpointNames(contents)
 }
 
+func nonInteractiveContext() -> LAContext {
+    let context = LAContext()
+    context.interactionNotAllowed = true
+    return context
+}
+
+func authenticationContext(reason: String) -> LAContext {
+    let context = LAContext()
+    context.localizedReason = reason
+    return context
+}
+
+// The gate belongs on the item, not on a branch in this binary: without it the key
+// is readable by anything that can reach the login Keychain.
+func accessControl() -> SecAccessControl {
+    var error: Unmanaged<CFError>?
+    guard let control = SecAccessControlCreateWithFlags(
+        nil, kSecAttrAccessibleWhenUnlocked, .userPresence, &error) else {
+        let detail = error?.takeRetainedValue().localizedDescription ?? "unknown"
+        fputs("Failed to build Keychain access control: \(detail)\n", stderr)
+        exit(1)
+    }
+    return control
+}
+
 func authenticate(reason: String) {
     let context = LAContext()
     var error: NSError?
@@ -55,7 +80,8 @@ func authenticate(reason: String) {
     guard succeeded else { exit(2) }
 }
 
-func storeKey(_ key: SymmetricKey) {
+@discardableResult
+func storeKey(_ key: SymmetricKey, gated: Bool = true) -> Bool {
     let keyData = key.withUnsafeBytes { Data($0) }
 
     let deleteQuery: [String: Any] = [
@@ -65,27 +91,60 @@ func storeKey(_ key: SymmetricKey) {
     ]
     SecItemDelete(deleteQuery as CFDictionary)
 
-    let addQuery: [String: Any] = [
+    var addQuery: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: KEYCHAIN_SERVICE,
         kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
-        kSecValueData as String: keyData,
-        kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+        kSecValueData as String: keyData
     ]
+    if gated {
+        addQuery[kSecAttrAccessControl as String] = accessControl()
+    } else {
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+    }
 
     let status = SecItemAdd(addQuery as CFDictionary, nil)
     guard status == errSecSuccess else {
+        if gated { return false }
         fputs("Failed to store key: \(status)\n", stderr)
         exit(1)
     }
+    return true
 }
 
-func loadKey() -> SymmetricKey? {
+func keyExists() -> Bool {
     let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: KEYCHAIN_SERVICE,
         kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
-        kSecReturnData as String: true
+        kSecUseAuthenticationContext as String: nonInteractiveContext()
+    ]
+    let status = SecItemCopyMatching(query as CFDictionary, nil)
+    return status == errSecSuccess || status == errSecInteractionNotAllowed
+}
+
+func keyIsGated() -> Bool {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: KEYCHAIN_SERVICE,
+        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
+        kSecReturnAttributes as String: true,
+        kSecUseAuthenticationContext as String: nonInteractiveContext()
+    ]
+    var item: AnyObject?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecInteractionNotAllowed { return true }
+    guard status == errSecSuccess, let attributes = item as? [String: Any] else { return false }
+    return attributes[kSecAttrAccessControl as String] != nil
+}
+
+func loadKey(reason: String) -> SymmetricKey? {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: KEYCHAIN_SERVICE,
+        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
+        kSecReturnData as String: true,
+        kSecUseAuthenticationContext as String: authenticationContext(reason: reason)
     ]
 
     var item: AnyObject?
@@ -95,15 +154,35 @@ func loadKey() -> SymmetricKey? {
     return SymmetricKey(data: keyData)
 }
 
-func decryptWithKey(reason: String) -> (SymmetricKey, String) {
-    authenticate(reason: reason)
+func upgradeKeyProtection() {
+    guard keyExists() else {
+        fputs("No encryption key in the Keychain - nothing to upgrade\n", stderr)
+        exit(1)
+    }
+    if keyIsGated() {
+        print("Encryption key is already gated by the Keychain")
+        return
+    }
+    guard let key = loadKey(reason: "Upgrade keyguard key protection") else {
+        fputs("Could not read the existing encryption key\n", stderr)
+        exit(1)
+    }
+    if storeKey(key), keyIsGated() {
+        print("Encryption key is now gated by the Keychain, not by this binary")
+        return
+    }
+    storeKey(key, gated: false)
+    fputs("Upgrade failed - the previous protection was restored, secrets are still readable\n", stderr)
+    exit(1)
+}
 
+func decryptWithKey(reason: String) -> (SymmetricKey, String) {
     guard let combined = try? Data(contentsOf: SECRETS_FILE) else {
         fputs("No secrets file found. Use 'keyguard set KEY' or 'keyguard import <path>' to create one.\n", stderr)
         exit(1)
     }
 
-    guard let key = loadKey() else {
+    guard let key = loadKey(reason: reason) else {
         fputs("No encryption key found in Keychain. Was it deleted or created on another machine?\n", stderr)
         fputs("If starting fresh, run 'keyguard clear' first, then re-import your secrets.\n", stderr)
         exit(1)
@@ -166,7 +245,7 @@ func readSecret() -> String? {
 
 func loadOrInitSecrets(reason: String) -> (SymmetricKey, [String: String]) {
     guard FileManager.default.fileExists(atPath: SECRETS_FILE.path) else {
-        if loadKey() != nil {
+        if keyExists() {
             fputs("Keychain already contains an encryption key but no secrets file at \(SECRETS_FILE.path)\n", stderr)
             fputs("Generating a new key would make any existing .enc file permanently undecryptable.\n", stderr)
             fputs("If you want to start fresh, run 'keyguard clear' first.\n", stderr)
@@ -176,8 +255,7 @@ func loadOrInitSecrets(reason: String) -> (SymmetricKey, [String: String]) {
         storeKey(key)
         return (key, [:])
     }
-    authenticate(reason: reason)
-    guard let existingKey = loadKey() else {
+    guard let existingKey = loadKey(reason: reason) else {
         fputs("No encryption key found in Keychain. Secrets file exists at \(SECRETS_FILE.path) but cannot be decrypted.\n", stderr)
         fputs("If starting fresh, run 'keyguard clear' first, then re-import your secrets.\n", stderr)
         exit(1)
@@ -197,7 +275,7 @@ func setSecret(name: String, value: String) {
     let key: SymmetricKey
 
     if FileManager.default.fileExists(atPath: SECRETS_FILE.path) {
-        guard let existingKey = loadKey() else {
+        guard let existingKey = loadKey(reason: "Unlock secrets to set \(name)") else {
             fputs("No encryption key found in Keychain. Secrets file exists at \(SECRETS_FILE.path) but cannot be decrypted.\n", stderr)
             fputs("If starting fresh, run 'keyguard clear' first, then re-import your secrets.\n", stderr)
             exit(1)
@@ -210,10 +288,9 @@ func setSecret(name: String, value: String) {
             exit(1)
         }
         entries = parseEnv(content)
-        authenticate(reason: setSecretReason(name: name, exists: entries[name] != nil))
         key = existingKey
     } else {
-        if loadKey() != nil {
+        if keyExists() {
             fputs("Keychain already contains an encryption key but no secrets file at \(SECRETS_FILE.path)\n", stderr)
             fputs("Generating a new key would make any existing .enc file permanently undecryptable.\n", stderr)
             fputs("If you want to start fresh, run 'keyguard clear' first.\n", stderr)
@@ -224,9 +301,10 @@ func setSecret(name: String, value: String) {
         key = newKey
     }
 
+    let outcome = setSecretReason(name: name, exists: entries[name] != nil)
     entries[name] = value
     encrypt(serializeEnv(entries), using: key)
-    print("Set '\(name)'")
+    print(outcome)
 }
 
 func deleteSecret(name: String) {
@@ -326,8 +404,7 @@ func importEnv(path: String, forceOverwrite: Bool) {
 }
 
 func exportKey() {
-    authenticate(reason: "Export encryption key")
-    guard let key = loadKey() else {
+    guard let key = loadKey(reason: "Export encryption key") else {
         fputs("No encryption key found in Keychain\n", stderr)
         exit(1)
     }
@@ -341,7 +418,7 @@ func importKey(base64: String) {
         fputs("Invalid key: expected 44-character base64 encoding of a 256-bit key\n", stderr)
         exit(1)
     }
-    if loadKey() != nil {
+    if keyExists() {
         fputs("Keychain already contains an encryption key. Run 'keyguard clear' first to replace it.\n", stderr)
         exit(1)
     }
@@ -369,6 +446,7 @@ func printUsage() {
       export                       Print all secrets in KEY=VALUE format
       import-key [BASE64]          Import an encryption key into Keychain
                                      (prompts for key if omitted)
+      upgrade                      Move the encryption key behind a Keychain access control
       export-key                   Print the encryption key as base64
       clear                        Delete all secrets and the encryption key
       help                         Show this help message
@@ -476,6 +554,9 @@ case "list":
 
 case "export":
     print(decrypt(reason: "Export all secrets"), terminator: "")
+
+case "upgrade":
+    upgradeKeyProtection()
 
 case "export-key":
     exportKey()
