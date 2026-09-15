@@ -80,78 +80,71 @@ func authenticate(reason: String) {
     guard succeeded else { exit(2) }
 }
 
-@discardableResult
-func storeKey(_ key: SymmetricKey, gated: Bool = true) -> Bool {
-    let keyData = key.withUnsafeBytes { Data($0) }
-
-    let deleteQuery: [String: Any] = [
+func baseQuery(dataProtection: Bool) -> [String: Any] {
+    var query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: KEYCHAIN_SERVICE,
         kSecAttrAccount as String: KEYCHAIN_ACCOUNT
     ]
-    SecItemDelete(deleteQuery as CFDictionary)
+    // SecAccessControl is only honoured by the data protection keychain; the legacy
+    // file-based one rejects the add outright.
+    if dataProtection {
+        query[kSecUseDataProtectionKeychain as String] = true
+    }
+    return query
+}
 
-    var addQuery: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: KEYCHAIN_SERVICE,
-        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
-        kSecValueData as String: keyData
-    ]
+func writeKey(_ key: SymmetricKey, gated: Bool) -> OSStatus {
+    let keyData = key.withUnsafeBytes { Data($0) }
+    SecItemDelete(baseQuery(dataProtection: true) as CFDictionary)
+    SecItemDelete(baseQuery(dataProtection: false) as CFDictionary)
+
+    var addQuery = baseQuery(dataProtection: gated)
+    addQuery[kSecValueData as String] = keyData
     if gated {
         addQuery[kSecAttrAccessControl as String] = accessControl()
     } else {
         addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
     }
+    return SecItemAdd(addQuery as CFDictionary, nil)
+}
 
-    let status = SecItemAdd(addQuery as CFDictionary, nil)
+func storeKey(_ key: SymmetricKey, gated: Bool = true) {
+    let status = writeKey(key, gated: gated)
     guard status == errSecSuccess else {
-        if gated { return false }
         fputs("Failed to store key: \(status)\n", stderr)
         exit(1)
     }
-    return true
 }
 
-func keyExists() -> Bool {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: KEYCHAIN_SERVICE,
-        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
-        kSecUseAuthenticationContext as String: nonInteractiveContext()
-    ]
+func keyPresent(dataProtection: Bool) -> Bool {
+    var query = baseQuery(dataProtection: dataProtection)
+    query[kSecUseAuthenticationContext as String] = nonInteractiveContext()
     let status = SecItemCopyMatching(query as CFDictionary, nil)
     return status == errSecSuccess || status == errSecInteractionNotAllowed
 }
 
+func keyExists() -> Bool {
+    keyPresent(dataProtection: true) || keyPresent(dataProtection: false)
+}
+
 func keyIsGated() -> Bool {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: KEYCHAIN_SERVICE,
-        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
-        kSecReturnAttributes as String: true,
-        kSecUseAuthenticationContext as String: nonInteractiveContext()
-    ]
-    var item: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
-    if status == errSecInteractionNotAllowed { return true }
-    guard status == errSecSuccess, let attributes = item as? [String: Any] else { return false }
-    return attributes[kSecAttrAccessControl as String] != nil
+    keyPresent(dataProtection: true)
 }
 
 func loadKey(reason: String) -> SymmetricKey? {
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: KEYCHAIN_SERVICE,
-        kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
-        kSecReturnData as String: true,
-        kSecUseAuthenticationContext as String: authenticationContext(reason: reason)
-    ]
+    for dataProtection in [true, false] {
+        var query = baseQuery(dataProtection: dataProtection)
+        query[kSecReturnData as String] = true
+        query[kSecUseAuthenticationContext as String] = authenticationContext(reason: reason)
 
-    var item: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
-
-    guard status == errSecSuccess, let keyData = item as? Data else { return nil }
-    return SymmetricKey(data: keyData)
+        var item: AnyObject?
+        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+           let keyData = item as? Data {
+            return SymmetricKey(data: keyData)
+        }
+    }
+    return nil
 }
 
 func upgradeKeyProtection() {
@@ -167,12 +160,18 @@ func upgradeKeyProtection() {
         fputs("Could not read the existing encryption key\n", stderr)
         exit(1)
     }
-    if storeKey(key), keyIsGated() {
+    let status = writeKey(key, gated: true)
+    if status == errSecSuccess, keyIsGated() {
         print("Encryption key is now gated by the Keychain, not by this binary")
         return
     }
     storeKey(key, gated: false)
-    fputs("Upgrade failed - the previous protection was restored, secrets are still readable\n", stderr)
+    fputs("Upgrade failed (SecItemAdd \(status)) - the previous protection was restored, "
+        + "secrets are still readable\n", stderr)
+    if status == errSecMissingEntitlement {
+        fputs("errSecMissingEntitlement: the data protection keychain needs a signed binary "
+            + "with a keychain-access-groups entitlement.\n", stderr)
+    }
     exit(1)
 }
 
