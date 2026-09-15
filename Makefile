@@ -8,6 +8,10 @@ SECRETS_FILE       ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.en
 BRIDGE_CONFIG_FILE ?= $(or $(KEYGUARD_BRIDGE_CONFIG_FILE),$(HOME)/.mac-bridge-endpoints.yaml)
 LOG_FILE           ?= $(or $(KEYGUARD_LOG_FILE),$(HOME)/.keyguard/access.log)
 
+CORE_SOURCES      := $(wildcard Sources/KeyguardCore/*.swift)
+CLI_SOURCES       := $(wildcard Sources/keyguard/*.swift)
+SWIFT_TEST_SUITES := $(basename $(notdir $(wildcard Tests/KeyguardCoreTests/*.swift)))
+
 BINARY     := $(PREFIX)/bin/keyguard
 SERVER_DIR := $(PREFIX)/lib/keyguard
 SERVER     := $(SERVER_DIR)/keyguard-server.py
@@ -42,7 +46,7 @@ help: ## Show available targets
 
 build: bin/keyguard ## Compile the Swift binary
 
-bin/keyguard: Sources/keyguard/main.swift Sources/KeyguardCore/Logic.swift
+bin/keyguard: $(CLI_SOURCES) $(CORE_SOURCES)
 	swift build -c release 2>&1
 	mkdir -p bin
 	cp .build/release/keyguard bin/keyguard
@@ -51,8 +55,12 @@ bin/keyguard: Sources/keyguard/main.swift Sources/KeyguardCore/Logic.swift
 test: test-swift test-python ## Run all tests
 
 test-swift: ## Run Swift unit tests
-	mkdir -p bin
-	swiftc -parse-as-library Sources/KeyguardCore/Logic.swift Tests/KeyguardCoreTests/LogicTests.swift -o bin/test-logic && bin/test-logic
+	@mkdir -p bin
+	@for suite in $(SWIFT_TEST_SUITES); do \
+		echo "== $$suite"; \
+		swiftc -parse-as-library $(CORE_SOURCES) Tests/KeyguardCoreTests/$$suite.swift -o "bin/test-$$suite" || exit 1; \
+		"bin/test-$$suite" || exit 1; \
+	done
 
 test-python: ## Run Python tests
 	python3 -m pytest Tests/ -v
