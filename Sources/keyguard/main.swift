@@ -95,6 +95,15 @@ guard args.count >= 2 else {
     exit(1)
 }
 
+// Answered before anything else and kept out of --help: the shell completion
+// calls this on every TAB, so it must never prompt, never touch the store and
+// never appear as a user-facing option.
+if args[1] == "--complete" {
+    Completion.values(field: args.count > 2 ? args[2] : "",
+                      argument: args.count > 3 ? args[3] : nil).forEach { print($0) }
+    exit(0)
+}
+
 switch args[1] {
 case "help", "--help", "-h":
     printUsage()
