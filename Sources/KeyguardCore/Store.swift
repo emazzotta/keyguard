@@ -110,7 +110,7 @@ public let storeVariableDirectory = "vars"
 
 /// Hashing is injected so the layout logic can be exercised without an Apple
 /// framework: the derivation is what can be wrong here, not SHA-256 itself.
-public typealias Digest = (Data) -> Data
+public typealias DigestFunction = (Data) -> Data
 
 public func hex(_ data: Data) -> String {
     data.map { String(format: "%02x", $0) }.joined()
@@ -118,7 +118,7 @@ public func hex(_ data: Data) -> String {
 
 /// `SHA256(salt || name)`, so a stolen PVC or backup reveals how many
 /// variables exist and nothing about which.
-public func variableFile(salt: Data, name: String, digest: Digest) -> String {
+public func variableFile(salt: Data, name: String, digest: DigestFunction) -> String {
     "\(storeVariableDirectory)/\(hex(digest(salt + Data(name.utf8)))).age"
 }
 
@@ -210,7 +210,7 @@ public func migrationPlan(entries: [String: String],
                           salt: Data,
                           recipients: RecipientSet,
                           tierFor: (String) -> Tier,
-                          digest: Digest) -> (variables: [PlannedVariable], index: StoreIndex) {
+                          digest: DigestFunction) -> (variables: [PlannedVariable], index: StoreIndex) {
     var planned: [PlannedVariable] = []
     var indexEntries: [String: IndexEntry] = [:]
 

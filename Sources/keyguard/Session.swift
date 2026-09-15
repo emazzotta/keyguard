@@ -12,7 +12,7 @@ struct Session {
     let runner: AgeRunner
     let keygenBinary: String
 
-    static let sha256: Digest = { Data(SHA256.hash(data: $0)) }
+    static let sha256: DigestFunction = { Data(SHA256.hash(data: $0)) }
 
     static func make() throws -> Session {
         let environment = ProcessInfo.processInfo.environment

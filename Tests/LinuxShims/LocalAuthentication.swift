@@ -5,6 +5,11 @@ import Foundation
 
 public typealias NSErrorPointer = UnsafeMutablePointer<NSError?>?
 
+// Present only to occupy the SDK's names so a collision surfaces here.
+public enum LABiometryType { case none, touchID, faceID }
+public enum LACredentialType { case applicationPassword }
+public enum LAError: Error { case authenticationFailed }
+
 public enum LAPolicy {
     case deviceOwnerAuthenticationWithBiometrics
 }

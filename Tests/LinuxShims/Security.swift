@@ -11,6 +11,14 @@ public typealias CFDictionary = [String: Any]
 public typealias CFString = String
 public typealias CFTypeRef = AnyObject
 
+// Present only to occupy the SDK's names so a collision surfaces here.
+public protocol SecKey {}
+public protocol SecCertificate {}
+public protocol SecTrust {}
+public protocol SecIdentity {}
+public protocol SecPolicy {}
+public protocol SecAccessControl {}
+
 public let errSecSuccess: OSStatus = 0
 public let errSecItemNotFound: OSStatus = -25300
 

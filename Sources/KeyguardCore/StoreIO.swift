@@ -11,9 +11,9 @@ import Glibc
 public struct Store {
     public let root: URL
     private let runner: AgeRunner
-    private let digest: Digest
+    private let digest: DigestFunction
 
-    public init(root: URL, runner: AgeRunner, digest: @escaping Digest) {
+    public init(root: URL, runner: AgeRunner, digest: @escaping DigestFunction) {
         self.root = root
         self.runner = runner
         self.digest = digest

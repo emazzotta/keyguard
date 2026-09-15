@@ -13,7 +13,26 @@ public struct SymmetricKey: Equatable {
     }
 }
 
-public struct SHA256Digest: Sequence {
+// The shim's real job beyond compiling is to occupy the same names the SDK
+// does, so a collision fails here instead of on the Mac. `Digest` already cost
+// one round trip that way.
+public protocol Digest: Sequence where Element == UInt8 {}
+public protocol HashFunction {}
+public protocol MessageAuthenticationCode {}
+public enum HMAC {}
+public enum HKDF {}
+public enum ChaChaPoly {}
+public enum Curve25519 {}
+public enum P256 {}
+public enum P384 {}
+public enum P521 {}
+public enum Insecure {}
+public enum SecureEnclave {}
+public enum SharedSecret {}
+public enum SymmetricKeySize {}
+public enum CryptoKitError: Error { case incorrectParameterSize }
+
+public struct SHA256Digest: Digest {
     let bytes: [UInt8]
     public func makeIterator() -> Array<UInt8>.Iterator { bytes.makeIterator() }
 }
