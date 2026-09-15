@@ -2,7 +2,7 @@
 
 [![Pipeline](https://github.com/emazzotta/keyguard/actions/workflows/pipeline.yml/badge.svg)](https://github.com/emazzotta/keyguard/actions/workflows/pipeline.yml)
 
-A lightweight, local secret manager for macOS. Encrypts secrets on disk with AES-256-GCM and gates every decryption behind Touch ID. Exposes secrets over a local HTTP server so Docker containers or local scripts can fetch them at runtime without credentials ever being baked into images or environment variables.
+A lightweight, local secret manager for macOS. Encrypts each secret on disk as its own [age](https://age-encryption.org) file and gates every decryption behind Touch ID. Exposes secrets over a local HTTP server so Docker containers or local scripts can fetch them at runtime without credentials ever being baked into images or environment variables.
 
 ## How it works
 
@@ -11,16 +11,42 @@ Docker container
   └── curl http://host.docker.internal:7777/TOKEN,PASSWORD
         └── keyguard-server (host, port 7777)
               └── keyguard get TOKEN PASSWORD
-                    ├── Touch ID prompt: "Reveal TOKEN, PASSWORD"
-                    ├── AES-256-GCM decrypt ~/.keyguard/secrets.enc
+                    ├── Touch ID prompt: "Reveal TOKEN, PASSWORD"  (once, not once per key)
+                    ├── age-decrypt the index, then only the two files it names
                     └── return TOKEN=value\nPASSWORD=value
 ```
 
-Secrets never exist in plaintext on disk. The encrypted file is the source of truth. Every read requires a fingerprint.
+Secrets never exist in plaintext on disk, and every read requires a fingerprint.
+
+### The store
+
+```
+keyguard-store/
+├── meta.json       plaintext: a SHA-256 per file, so damage is detectable
+├── index.age       the salt, and the name -> file mapping
+└── vars/
+    └── <sha256(salt || NAME)>.age     one secret, holding {name, value}
+```
+
+One file per secret rather than one blob, which buys three things: a reader
+decrypts only what it was asked for, two writers adding different secrets stop
+colliding, and `list` never has to decrypt any values at all.
+
+Filenames are salted hashes and the salt lives inside `index.age`, so a copy of
+the directory reveals how many secrets exist and nothing about which. Each
+secret's name is stored *inside* its own ciphertext, so a swapped file is
+detected on read rather than silently returning the wrong value. Values are
+padded to a 256-byte boundary so file sizes do not leak secret lengths.
+
+The recipient set is held in two places - `~/.keyguard/recipients` on the
+machine, and canonically inside `index.age` - and compared on every operation.
+They diverging is the one failure that would otherwise be silent and total, so
+it hard-fails rather than picking a winner.
 
 ## Requirements
 
 - macOS with Touch ID
+- [`age`](https://age-encryption.org) and `age-keygen` (`brew install age`)
 - Python 3 (pre-installed on macOS)
 - Xcode Command Line Tools (`xcode-select --install`)
 
@@ -75,18 +101,40 @@ keyguard export                                      # print all key=value pairs
 keyguard delete MY_API_TOKEN                         # remove a key
 keyguard mv HETZNER_USER HETZNER_ACCOUNT_USER        # rename a key (alias: rename)
 keyguard mv OLD NEW --force                          # overwrite NEW if it already exists
-keyguard clear                                       # wipe everything (secrets file + encryption key)
+keyguard verify                                      # check the store against its manifest
+keyguard clear                                       # wipe the store and its identity
 ```
 
-**Backup and restore the encryption key:**
+`verify` is the only command that needs no Touch ID: it hashes what is on disk
+and compares it with `meta.json`, which catches a half-applied write or a
+sync-conflict copy without decrypting anything.
+
+**Backup and restore the identity:**
 ```bash
-keyguard export-key            # print base64-encoded encryption key to stdout
-keyguard import-key            # import key interactively (prompts for paste)
-keyguard import-key <base64>   # import key from argument
-echo "<base64>" | keyguard import-key  # import key from stdin
+keyguard export-key                       # print the age identity to stdout
+keyguard import-key                       # import interactively (prompts for paste)
+keyguard import-key AGE-SECRET-KEY-1...   # import from argument
+echo "AGE-SECRET-KEY-1..." | keyguard import-key
 ```
 
-`export-key` outputs the raw 256-bit AES key as base64 (44 characters). Store it somewhere safe - with this key and the `secrets.enc` file you can restore your secrets on any Mac. `import-key` refuses to overwrite an existing key - run `keyguard clear` first if replacing.
+`export-key` prints the age identity that opens every file in the store. Keep it
+somewhere safe: with it and a copy of the store directory you can restore on any
+Mac. `import-key` refuses to overwrite an existing identity - run `keyguard
+clear` first if you mean to replace it.
+
+## Migrating from the pre-age store
+
+Earlier keyguard kept one AES-256-GCM blob at `~/.keyguard/secrets.enc`. To convert:
+
+```bash
+keyguard migrate
+```
+
+It reads every secret back out of the new store and compares it with the source
+before reporting success; if anything differs, the new store is moved aside and
+nothing else is touched. **The old file and its Keychain key are left exactly as
+they were**, so reinstalling the previous keyguard is a complete rollback. Delete
+them yourself once you are satisfied.
 
 ## Using from Docker
 
@@ -269,7 +317,7 @@ Every successful bridge call appends a line to `~/.keyguard/access.log` with the
 | Public endpoints (`public: true`) | Auth check is skipped by design — the IP allowlist is the only gate. Use only for side-effect-light, non-secret-returning commands you would be comfortable seeing called by anything on the local Docker network |
 | Accidental opt-in to public | Strict parser: only the literal YAML boolean `true` opens the gate. `public: "true"`, `public: 1`, `public: maybe` all stay protected, with a warning logged |
 | Token interception on the network | Only localhost and Docker internal subnets are accepted (same as keyguard secrets) |
-| Token at rest | The token lives inside the AES-256-GCM-encrypted keyguard store under `MAC_BRIDGE_TOKEN` — never on disk in plaintext |
+| Token at rest | The token lives inside the age-encrypted keyguard store under `MAC_BRIDGE_TOKEN` — never on disk in plaintext |
 | Touch ID prompt spam from unauthenticated callers | Requests without a `Bearer …` header are rejected *before* keyguard is invoked — no prompt fires for malformed/missing auth |
 | Touch ID prompt spam from misconfigured callers | Failed token resolutions are rate-limited to 1 per 60 seconds; SIGHUP clears the limit |
 | Touch ID prompt from public endpoint calls | Public endpoints never invoke keyguard — a million unauthenticated calls to a public endpoint cannot fire a single prompt |
@@ -283,10 +331,11 @@ The config file itself is the trust boundary: only what you write into it can be
 
 ## Custom secrets file path
 
-By default secrets are stored at `~/.keyguard/secrets.enc`. Override with an environment variable:
+By default the store sits in a `keyguard-store` directory beside `KEYGUARD_SECRETS_FILE` if that is set, and at `~/.keyguard/store` otherwise. Sitting beside the old file is deliberate: that location is already wherever the secrets are backed up, and quietly relocating the store out of it would drop the off-machine copy. Override either with an environment variable:
 
 ```bash
-export KEYGUARD_SECRETS_FILE=~/Dropbox/keyguard/secrets.enc
+export KEYGUARD_STORE=~/Dropbox/keyguard/keyguard-store
+export KEYGUARD_RECIPIENTS_FILE=~/.keyguard/recipients   # keep this one local, never synced
 ```
 
 Set this in your shell profile before running `make install` — the value is baked into the launchd plist automatically so the server always uses the correct path.
@@ -317,6 +366,23 @@ export KEYGUARD_LOG_FILE=~/Library/Logs/keyguard/access.log
 
 Set it before `make install` so the value is baked into the launchd plist.
 
+## Testing the CLI off macOS
+
+The CLI is macOS-only in production - Keychain, LocalAuthentication, CryptoKit -
+which historically meant it could only be exercised by installing it. That is a
+poor place to discover that a change removed the Touch ID prompt.
+
+`Tests/LinuxShims/` supplies stand-in modules under those exact framework names:
+a file-backed Keychain, an `LAContext` that records every prompt it was asked
+for, and enough CryptoKit to hash and to open the pre-age blob. `make test-cli`
+builds the real `Sources/keyguard/` against them and drives it end to end -
+migrate, read, write, rename, delete, a denied fingerprint, a poisoned recipient
+set. The shims are never part of the shipped binary; `make build` resolves those
+imports to the real SDK.
+
+Only `TerminalInput.swift` is substituted, because `tcflag_t` differs between the
+platforms. Everything else under test is the code that ships.
+
 ## Makefile targets
 
 | Target | Description |
@@ -324,8 +390,9 @@ Set it before `make install` so the value is baked into the launchd plist.
 | `make` | Build, install, and restart (default) |
 | `make build` | Compile the Swift binary |
 | `make install` | Install binary, server, and launchd agent |
-| `make test` | Run all tests (Swift + Python) |
+| `make test` | Run all tests (Swift + CLI + Python) |
 | `make test-swift` | Run Swift unit tests only |
+| `make test-cli` | Drive the whole CLI end to end (Linux only, see below) |
 | `make test-python` | Run Python server tests only |
 | `make start` | Start the server |
 | `make stop` | Stop the server |
@@ -339,18 +406,18 @@ Set it before `make install` so the value is baked into the launchd plist.
 | Threat | Protection |
 |---|---|
 | Docker container reads secrets directly | Containers have no access to the host Keychain or filesystem |
-| Process on host reads `secrets.enc` | AES-256-GCM encrypted — unreadable without the key |
-| Process on host reads the encryption key | macOS Keychain ACL — other apps are challenged with a system password prompt |
+| Process on host reads the store | age-encrypted per file — unreadable without the identity |
+| Process on host reads the identity | macOS Keychain ACL — other apps are challenged with a system password prompt |
 | Unauthenticated HTTP request | Touch ID required for every decryption; biometrics only (no password fallback) |
 | Optional cached read without Touch ID | Opt-in per-request (`?timeout=N`), capped at 300s, in-memory only, every read still appends to the access log |
 | Request from another device on the network | Server rejects all IPs outside localhost and Docker subnets |
 | Inline `keyguard set KEY value` | Warning printed to stderr — use the interactive prompt instead |
 | `POST /<name>` from container | Value piped to `keyguard` via stdin — never appears in process args or `ps` |
-| Exported encryption key leaked | Touch ID required to export; not available over HTTP; stderr warning reminds user to store safely |
+| Exported identity leaked | Touch ID required to export; not available over HTTP; stderr warning reminds user to store safely |
 
 ### Encryption details
 
-- **Algorithm**: AES-256-GCM (authenticated encryption)
+- **Algorithm**: age (X25519 + ChaCha20-Poly1305), via the `age` binary rather than a reimplementation of the format
 - **Key**: 256-bit, randomly generated, stored in macOS Keychain
 - **Nonce**: 96-bit random nonce, freshly generated on every write
 - **On-disk format**: `nonce (12 bytes) || ciphertext || auth tag (16 bytes)`

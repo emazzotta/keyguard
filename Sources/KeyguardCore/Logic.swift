@@ -141,30 +141,3 @@ public func buildReason(base: String, cacheDuration: Int?, purpose: String? = ni
     guard let duration = cacheDuration else { return reason }
     return "\(reason) (cached for \(duration)s)"
 }
-
-public func setSecretReason(name: String, exists: Bool) -> String {
-    exists ? "Update \(name)" : "Add \(name)"
-}
-
-public enum RenameError: Error, Equatable {
-    case sourceNotFound(String)
-    case sameKey
-    case destinationExists(String)
-}
-
-public func renameEntry(
-    in entries: [String: String],
-    from oldKey: String,
-    to newKey: String,
-    overwrite: Bool = false
-) throws -> [String: String] {
-    guard oldKey != newKey else { throw RenameError.sameKey }
-    guard let value = entries[oldKey] else { throw RenameError.sourceNotFound(oldKey) }
-    if entries[newKey] != nil && !overwrite {
-        throw RenameError.destinationExists(newKey)
-    }
-    var result = entries
-    result.removeValue(forKey: oldKey)
-    result[newKey] = value
-    return result
-}

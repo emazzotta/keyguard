@@ -19,6 +19,7 @@ jobs:
       # which would quietly remove the only end-to-end coverage there is.
       - run: sudo apt-get update && sudo apt-get install -y age
       - run: make test-swift
+      - run: make test-cli
 
   python:
     runs-on: ubuntu-latest

@@ -105,6 +105,11 @@ struct AgeCommandTestRunner {
             exit(1)
         }
         check("should generate distinct identities", alice.secret != bob.secret)
+        checkEqual("should derive the recipient from an identity we already hold",
+                   (try? runner.recipient(forIdentity: alice.secret, keygenBinary: keygen)) ?? "",
+                   alice.recipient)
+        check("should refuse to derive a recipient from something that is not an identity",
+              (try? runner.recipient(forIdentity: "not-a-key", keygenBinary: keygen)) == nil)
 
         let file = dir.appendingPathComponent("v.age").path
         let secret = Padding.pad(Data(#"{"name":"JIRA_TOKEN","value":"s3cret"}"#.utf8))

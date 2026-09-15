@@ -115,6 +115,17 @@ public struct AgeRunner {
                 stdin: Data(identity.utf8))
     }
 
+    /// Derives the public half of an identity we already hold. Needed because
+    /// the Keychain stores only the secret, while every write needs the
+    /// recipient.
+    public func recipient(forIdentity identity: String, keygenBinary: String) throws -> String {
+        let output = try AgeRunner(binary: keygenBinary)
+            .run(arguments: ["-y"], stdin: Data(identity.utf8))
+        let recipient = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard recipient.hasPrefix("age1") else { throw AgeError.malformedKeygenOutput }
+        return recipient
+    }
+
     public func keygen(binary keygenBinary: String) throws -> AgeIdentity {
         let output = try AgeRunner(binary: keygenBinary).run(arguments: [], stdin: Data())
         return try parseKeygenOutput(String(decoding: output, as: UTF8.self))

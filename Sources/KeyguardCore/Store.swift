@@ -100,6 +100,8 @@ public enum StoreError: Error, Equatable {
     case payloadNameMismatch(expected: String, found: String)
     case corruptPadding
     case unsupportedStoreVersion(Int)
+    case unknownVariables([String])
+    case writeFailed(String)
 }
 
 public let storeIndexFile = "index.age"

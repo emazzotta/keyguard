@@ -1,4 +1,4 @@
-.PHONY: all build test test-swift test-python clean install uninstall start stop restart status help
+.PHONY: all build test test-swift test-cli test-python clean install uninstall start stop restart status help
 .DEFAULT_GOAL := all
 
 PREFIX             ?= /usr/local
@@ -52,7 +52,7 @@ bin/keyguard: $(CLI_SOURCES) $(CORE_SOURCES)
 	cp .build/release/keyguard bin/keyguard
 	codesign --sign - bin/keyguard
 
-test: test-swift test-python ## Run all tests
+test: test-swift test-cli test-python ## Run all tests
 
 test-swift: ## Run Swift unit tests
 	@mkdir -p bin
@@ -61,6 +61,9 @@ test-swift: ## Run Swift unit tests
 		swiftc -parse-as-library $(CORE_SOURCES) Tests/KeyguardCoreTests/$$suite.swift -o "bin/test-$$suite" || exit 1; \
 		"bin/test-$$suite" || exit 1; \
 	done
+
+test-cli: ## Drive the whole CLI end to end (Linux only; skips elsewhere)
+	@bash Tests/linux-cli-test.sh
 
 test-python: ## Run Python tests
 	python3 -m pytest Tests/ -v
