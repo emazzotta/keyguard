@@ -47,6 +47,8 @@ it hard-fails rather than picking a winner.
 
 - macOS with Touch ID
 - [`age`](https://age-encryption.org) and `age-keygen` (`brew install age`)
+- PyYAML, for the bridge config: `python3 -m pip install -r Tests/requirements.txt`. Without it the
+  server starts but the bridge stays disabled, and the Python suite fails 21 tests
 - Python 3 (pre-installed on macOS)
 - Xcode Command Line Tools (`xcode-select --install`)
 
@@ -393,7 +395,7 @@ platforms. Everything else under test is the code that ships.
 | `make test` | Run all tests (Swift + CLI + Python) |
 | `make test-swift` | Run Swift unit tests only |
 | `make test-cli` | Drive the whole CLI end to end (Linux only, see below) |
-| `make test-python` | Run Python server tests only |
+| `make test-python` | Run Python server tests only (needs `Tests/requirements.txt`) |
 | `make start` | Start the server |
 | `make stop` | Stop the server |
 | `make restart` | Restart the server |

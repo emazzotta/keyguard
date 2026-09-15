@@ -1,0 +1,5 @@
+# PyYAML is not test-only: keyguard_server parses the bridge config with it and
+# disables the bridge without it, which is why its absence reads as 21 failing
+# tests rather than one missing dependency.
+pytest
+pyyaml

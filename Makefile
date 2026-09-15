@@ -66,6 +66,10 @@ test-cli: ## Drive the whole CLI end to end (Linux only; skips elsewhere)
 	@bash Tests/linux-cli-test.sh
 
 test-python: ## Run Python tests
+	@python3 -c "import pytest, yaml" 2>/dev/null || { \
+		echo "Missing Python test dependencies for $$(command -v python3)."; \
+		echo "Install them with:  python3 -m pip install -r Tests/requirements.txt"; \
+		exit 1; }
 	python3 -m pytest Tests/ -v
 
 install: build ## Install binary, server, and register launchd agent

@@ -28,5 +28,5 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install pytest pyyaml
+      - run: pip install -r Tests/requirements.txt
       - run: make test-python
