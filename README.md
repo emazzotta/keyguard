@@ -16,25 +16,7 @@ Docker container
                     └── return TOKEN=value\nPASSWORD=value
 ```
 
-Secrets never exist in plaintext on disk. The encrypted file is the source of truth.
-
-Every read requires a fingerprint, and the Keychain is what enforces it: the encryption key carries a `SecAccessControl` with `.userPresence`, so the OS refuses to hand it back until Touch ID or the passcode succeeds. That is a property of the stored item rather than a check inside this binary, so replacing or patching `keyguard` does not get you the key.
-
-## Upgrading an existing install
-
-Keys stored before the access control existed are readable whenever the login
-Keychain is unlocked - Touch ID was enforced by this binary rather than by the
-OS. One command migrates them:
-
-```bash
-keyguard export-key > /dev/null   # confirm you can still read the key first
-keyguard upgrade
-```
-
-`upgrade` is idempotent and says so if the key is already gated. If the re-store
-fails it puts the original key back rather than leaving you locked out, but take
-a copy of `keyguard export-key` somewhere safe before running it anyway - that
-key is the only thing that can decrypt the secrets file.
+Secrets never exist in plaintext on disk. The encrypted file is the source of truth. Every read requires a fingerprint.
 
 ## Requirements
 
@@ -94,7 +76,6 @@ keyguard delete MY_API_TOKEN                         # remove a key
 keyguard mv HETZNER_USER HETZNER_ACCOUNT_USER        # rename a key (alias: rename)
 keyguard mv OLD NEW --force                          # overwrite NEW if it already exists
 keyguard clear                                       # wipe everything (secrets file + encryption key)
-keyguard upgrade                                     # move an old, ungated key behind the Keychain access control
 ```
 
 **Backup and restore the encryption key:**
