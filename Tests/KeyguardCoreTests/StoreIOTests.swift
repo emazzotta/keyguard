@@ -1,8 +1,5 @@
 import Foundation
 
-/// Must depend on every byte. An earlier version folded only the first 32,
-/// which every age file shares verbatim - it reported a store as intact no
-/// matter what had been done to it.
 private func rollingDigest(_ data: Data) -> Data {
     var lanes = [UInt64](repeating: 0xcbf2_9ce4_8422_2325, count: 4)
     for (offset, byte) in data.enumerated() {
@@ -10,8 +7,6 @@ private func rollingDigest(_ data: Data) -> Data {
         lanes[lane] = (lanes[lane] ^ UInt64(byte)) &* 0x100_0000_01b3
     }
     lanes[0] = (lanes[0] ^ UInt64(data.count)) &* 0x100_0000_01b3
-    // Stop one short: at the full count the offset wraps to zero and each lane
-    // is XORed with itself, zeroing the entire digest.
     for round in 0..<(lanes.count - 1) {
         for lane in 0..<lanes.count {
             lanes[lane] = (lanes[lane] ^ lanes[(lane + round + 1) % lanes.count]) &* 0x100_0000_01b3
@@ -25,8 +20,6 @@ private func rollingDigest(_ data: Data) -> Data {
     return out
 }
 
-/// Produces a real age file so the digest helper can be checked against the
-/// thing it will actually be asked to tell apart.
 private func encryptedSample(_ runner: AgeRunner, to recipient: String, body: String) throws -> Data {
     let path = NSTemporaryDirectory() + "/keyguard-sample-\(UUID().uuidString).age"
     defer { try? FileManager.default.removeItem(atPath: path) }
@@ -146,8 +139,6 @@ struct StoreIOTestRunner {
               (try? store.loadIndex(identity: stranger.secret)) == nil)
 
         print("\nindex reachability")
-        // The dev box and the phone resolve names through the index, so it is
-        // sealed to every recipient in the set, not just the high tier.
         check("should let a low-tier recipient open the index",
               (try? store.loadIndex(identity: devbox.secret)) != nil)
         checkEqual("should show a low-tier recipient the same entries",

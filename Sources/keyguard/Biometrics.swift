@@ -1,10 +1,6 @@
 import Foundation
 import LocalAuthentication
 
-/// The gate in front of every identity load. It is an application-level check,
-/// not an OS-enforced one - see the passkey-secrets design, stage 1b. Removing
-/// it before the Secure Enclave identity exists leaves a binary that reads
-/// every secret with no prompt at all, which is exactly what shipped once.
 func authenticate(reason: String) {
     let context = LAContext()
     var error: NSError?

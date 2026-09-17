@@ -1,22 +1,16 @@
 import Foundation
 
-/// Reads the dispatch switch out of main.swift. The point of this suite is to
-/// catch the completion drifting away from the CLI, which is the failure that
-/// left `migrate`, `verify`, `init`, `delete` and six others untabbable.
 private func dispatchedCommands(at path: String) -> Set<String>? {
     guard let source = try? String(contentsOfFile: path, encoding: .utf8),
           let switchStart = source.range(of: "switch args[1] {") else { return nil }
 
     var found: Set<String> = []
     for line in source[switchStart.upperBound...].components(separatedBy: .newlines) {
-        // Only a closing brace in column zero ends the switch; the indented ones
-        // belong to blocks inside a case body.
         if line == "}" { break }
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("case "), trimmed.hasSuffix(":") else { continue }
         for piece in trimmed.dropFirst(5).dropLast().components(separatedBy: ",") {
             let label = piece.trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-            // `--help` and `-h` are flags, not words anyone tabs for.
             if !label.isEmpty, !label.hasPrefix("-"), label != "default" { found.insert(label) }
         }
     }

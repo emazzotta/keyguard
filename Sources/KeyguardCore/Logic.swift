@@ -77,8 +77,6 @@ private let bridgeEndpointNameCharacters = CharacterSet(charactersIn:
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
 private let maxBridgeEndpointNameLength = 64
 
-/// Endpoint names are identifiers, never prose - so a caller cannot dress a
-/// token read up as reassuring text in the Touch ID prompt.
 public func isValidBridgeEndpointName(_ name: String) -> Bool {
     guard !name.isEmpty, name.count <= maxBridgeEndpointNameLength else { return false }
     guard name.unicodeScalars.allSatisfy(bridgeEndpointNameCharacters.contains) else { return false }
@@ -96,10 +94,6 @@ private func endpointKey(fromTrimmed line: String) -> String? {
     return isValidBridgeEndpointName(key) ? key : nil
 }
 
-/// Top-level keys of the bridge config's `endpoints:` mapping, scanned without a
-/// YAML library. Deliberately conservative: anything it cannot read confidently
-/// yields an empty set, which downgrades the prompt to its bare form rather than
-/// asserting an endpoint it has not actually confirmed.
 public func parseBridgeEndpointNames(_ yaml: String) -> Set<String> {
     var names: Set<String> = []
     var childIndent: Int?
@@ -126,8 +120,6 @@ public func parseBridgeEndpointNames(_ yaml: String) -> Set<String> {
     return names
 }
 
-/// The prompt qualifier for a bridge-triggered token read, or nil when the name
-/// is not a confirmed endpoint - never a caller-supplied string.
 public func bridgePurpose(endpoint: String, configuredNames: Set<String>) -> String? {
     guard isValidBridgeEndpointName(endpoint), configuredNames.contains(endpoint) else { return nil }
     return "bridge endpoint \(endpoint)"

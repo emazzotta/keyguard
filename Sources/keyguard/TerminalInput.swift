@@ -1,10 +1,6 @@
 import Darwin
 import Foundation
 
-/// Reads a secret from the terminal with echo off. Separate from the rest of
-/// the CLI because it is the one piece that cannot be built anywhere but
-/// macOS - `tcflag_t` is `UInt` here and `UInt32` on Linux - so keeping it
-/// alone lets everything else be compiled and exercised off-platform.
 func readSecret() -> String? {
     var tty = termios()
     tcgetattr(STDIN_FILENO, &tty)

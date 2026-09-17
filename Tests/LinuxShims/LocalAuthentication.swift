@@ -1,11 +1,7 @@
-// Linux stand-in for LocalAuthentication. Records every prompt so a test can
-// assert that the biometric gate was actually reached - the check that was
-// missing when a binary shipped reading every secret without one.
 import Foundation
 
 public typealias NSErrorPointer = UnsafeMutablePointer<NSError?>?
 
-// Present only to occupy the SDK's names so a collision surfaces here.
 public enum LABiometryType { case none, touchID, faceID }
 public enum LACredentialType { case applicationPassword }
 public enum LAError: Error { case authenticationFailed }

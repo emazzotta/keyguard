@@ -116,8 +116,6 @@ struct AgeCommandTestRunner {
 
         do {
             try runner.encrypt(secret, to: [alice.recipient, bob.recipient], at: file)
-            // An age file is an ASCII header followed by a binary payload, so it
-            // is never decodable as a whole string.
             let bytes = (try? Data(contentsOf: URL(fileURLWithPath: file))) ?? Data()
             let header = String(decoding: bytes.prefix(512), as: UTF8.self)
             check("should write a file age recognises", header.hasPrefix("age-encryption.org/v1"))

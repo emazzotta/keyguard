@@ -2,8 +2,6 @@ import CryptoKit
 import Foundation
 import KeyguardCore
 
-/// The AES-GCM blob keyguard used before the store. Read-only: it exists so
-/// `migrate` has a source, and it is never written again.
 enum LegacyStore {
     static func exists(at url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.path)

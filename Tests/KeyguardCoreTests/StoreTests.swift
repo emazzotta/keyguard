@@ -1,7 +1,5 @@
 import Foundation
 
-/// Order-sensitive stand-in for SHA-256. The derivation is what these tests
-/// exercise - concatenation order, encoding, path shape - never the primitive.
 private func fakeDigest(_ data: Data) -> Data {
     var rolling: UInt8 = 7
     var out = Data()

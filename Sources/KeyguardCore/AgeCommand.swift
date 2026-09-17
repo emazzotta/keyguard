@@ -1,14 +1,8 @@
 import Foundation
 
-/// Argument construction for the `age` binary. Kept separate from the process
-/// plumbing so the part that can be wrong - flag order, recipient repetition,
-/// which stream carries the secret - is testable without macOS.
 public enum AgeCommand {
     public static let binaryOverrideVariable = "KEYGUARD_AGE_BIN"
 
-    /// Homebrew first: launchd hands the server a minimal PATH, so `age` is
-    /// resolved by absolute path rather than left to a lookup that works in an
-    /// interactive shell and nowhere else.
     public static let searchPaths = [
         "/opt/homebrew/bin/age",
         "/usr/local/bin/age",
@@ -21,14 +15,10 @@ public enum AgeCommand {
         "/usr/bin/age-keygen"
     ]
 
-    /// Plaintext arrives on stdin, never as an argument, so it stays out of the
-    /// process list.
     public static func encryptArguments(recipients: [String], output: String) -> [String] {
         recipients.flatMap { ["-r", $0] } + ["-o", output]
     }
 
-    /// The identity arrives on stdin for the same reason; `-` is age's spelling
-    /// for that. The ciphertext is a path because stdin is already taken.
     public static func decryptArguments(file: String) -> [String] {
         ["-d", "-i", "-", file]
     }
@@ -50,8 +40,6 @@ public struct AgeIdentity: Equatable, Sendable {
     }
 }
 
-/// `age-keygen` prints a comment block and then the key. Parsing it here keeps
-/// the brittle bit in reach of a test.
 public func parseKeygenOutput(_ output: String) throws -> AgeIdentity {
     var secret: String?
     var recipient: String?
@@ -71,8 +59,6 @@ public func parseKeygenOutput(_ output: String) throws -> AgeIdentity {
     return AgeIdentity(secret: secret, recipient: recipient)
 }
 
-/// Counts `-> ` stanzas in an age header. A file carrying more recipients than
-/// its tier calls for was re-encrypted to someone else.
 public func recipientStanzaCount(inHeader header: String) -> Int {
     header.components(separatedBy: .newlines)
         .prefix { !$0.hasPrefix("---") }
@@ -80,9 +66,6 @@ public func recipientStanzaCount(inHeader header: String) -> Int {
         .count
 }
 
-/// Runs the `age` binary. Foundation-only on purpose: keeping this out of the
-/// macOS-framework half of the tool is what lets the encrypt/decrypt path be
-/// tested end to end against a real `age` rather than reasoned about.
 public struct AgeRunner {
     public let binary: String
 
@@ -115,9 +98,6 @@ public struct AgeRunner {
                 stdin: Data(identity.utf8))
     }
 
-    /// Derives the public half of an identity we already hold. Needed because
-    /// the Keychain stores only the secret, while every write needs the
-    /// recipient.
     public func recipient(forIdentity identity: String, keygenBinary: String) throws -> String {
         let output = try AgeRunner(binary: keygenBinary)
             .run(arguments: ["-y"], stdin: Data(identity.utf8))
@@ -131,9 +111,6 @@ public struct AgeRunner {
         return try parseKeygenOutput(String(decoding: output, as: UTF8.self))
     }
 
-    /// Secrets travel on stdin, so they never reach the process list. stdin is
-    /// closed before stdout is drained, which is what keeps a large payload
-    /// from deadlocking against a full pipe.
     private func run(arguments: [String], stdin: Data) throws -> Data {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)

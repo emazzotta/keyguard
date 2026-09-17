@@ -1,9 +1,6 @@
 import Foundation
 import KeyguardCore
 
-/// Turns the typed errors from KeyguardCore into something a person can act
-/// on. Every message says what was *not* done, because a half-applied write
-/// to a secret store is the thing a reader needs ruled out first.
 func fail(_ message: String) -> Never {
     fputs(message.hasSuffix("\n") ? message : message + "\n", stderr)
     exit(1)

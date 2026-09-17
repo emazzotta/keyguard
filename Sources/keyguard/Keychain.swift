@@ -20,7 +20,6 @@ enum Keychain {
         SecItemDelete(query(account: identityAccount) as CFDictionary)
     }
 
-    /// Read-only, and only so `migrate` can open the store it is replacing.
     static func loadLegacyKey() -> SymmetricKey? {
         guard let data = load(account: legacyKeyAccount) else { return nil }
         return SymmetricKey(data: data)

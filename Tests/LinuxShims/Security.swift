@@ -1,17 +1,10 @@
-// Linux stand-in for the Security framework. Exists only so the CLI can be
-// typechecked and exercised off macOS; never compiled into the shipped binary,
-// which resolves `import Security` to the real SDK module.
 import Foundation
 
-// Linux Foundation ships none of the CoreFoundation types, so they are defined
-// here as the Swift types the calls actually carry. `x as CFDictionary` in the
-// CLI then becomes a no-op cast rather than a bridge.
 public typealias OSStatus = Int32
 public typealias CFDictionary = [String: Any]
 public typealias CFString = String
 public typealias CFTypeRef = AnyObject
 
-// Present only to occupy the SDK's names so a collision surfaces here.
 public protocol SecKey {}
 public protocol SecCertificate {}
 public protocol SecTrust {}
@@ -31,8 +24,6 @@ public let kSecAttrAccessible: CFString = "pdmn"
 public let kSecAttrAccessibleWhenUnlocked: CFString = "ak"
 public let kSecReturnData: CFString = "r_Data"
 
-/// Backed by a file so a test can drive several `keyguard` invocations and have
-/// them agree about what is stored, the way a real Keychain does.
 public enum FakeKeychain {
     public static var path: String {
         ProcessInfo.processInfo.environment["KEYGUARD_FAKE_KEYCHAIN"] ?? "/tmp/keyguard-fake-keychain.json"

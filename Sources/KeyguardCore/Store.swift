@@ -1,15 +1,10 @@
 import Foundation
 
-/// How much of the store a given recipient set can open. A variable's tier is
-/// decided once, when it is written, and changing it re-encrypts that file.
 public enum Tier: String, Codable, CaseIterable, Sendable {
     case high
     case low
 }
 
-/// The recipient set, held in two places that different parties control: a
-/// pinned file on each machine, and a canonical copy inside the encrypted
-/// index. They are compared on every operation and divergence is fatal.
 public struct RecipientSet: Codable, Equatable, Sendable {
     public let version: Int
     public let tiers: [String: [String]]
@@ -34,7 +29,6 @@ public struct IndexEntry: Codable, Equatable, Sendable {
     }
 }
 
-/// Plaintext of `index.age`. Recipients appear here as the canonical copy.
 public struct StoreIndex: Codable, Equatable, Sendable {
     public static let currentVersion = 1
 
@@ -54,8 +48,6 @@ public struct StoreIndex: Codable, Equatable, Sendable {
     }
 }
 
-/// Plaintext `meta.json`. Its own contents are unauthenticated, so it detects
-/// accidental damage and names what changed - it does not prove anything.
 public struct StoreMeta: Codable, Equatable, Sendable {
     public static let currentVersion = 1
 
@@ -68,8 +60,6 @@ public struct StoreMeta: Codable, Equatable, Sendable {
     }
 }
 
-/// What one `vars/<hash>.age` decrypts to. The name travels inside the
-/// ciphertext so a swapped file is detectable.
 public struct VariablePayload: Codable, Equatable, Sendable {
     public let name: String
     public let value: String
@@ -108,22 +98,16 @@ public let storeIndexFile = "index.age"
 public let storeMetaFile = "meta.json"
 public let storeVariableDirectory = "vars"
 
-/// Hashing is injected so the layout logic can be exercised without an Apple
-/// framework: the derivation is what can be wrong here, not SHA-256 itself.
 public typealias DigestFunction = (Data) -> Data
 
 public func hex(_ data: Data) -> String {
     data.map { String(format: "%02x", $0) }.joined()
 }
 
-/// `SHA256(salt || name)`, so a stolen PVC or backup reveals how many
-/// variables exist and nothing about which.
 public func variableFile(salt: Data, name: String, digest: DigestFunction) -> String {
     "\(storeVariableDirectory)/\(hex(digest(salt + Data(name.utf8)))).age"
 }
 
-/// Length-prefixed, then zero-filled to a block boundary, so a file size only
-/// ever reveals the secret's length rounded up to `blockSize`.
 public enum Padding {
     public static let blockSize = 256
     private static let lengthBytes = 4
@@ -160,8 +144,6 @@ public func checkIntegrity(meta: StoreMeta, actual: [String: String]) -> Integri
     )
 }
 
-/// Divergence is never resolved by picking a winner: an attacker who can edit
-/// one copy must not be able to decide which one counts.
 public func validateRecipients(pinned: RecipientSet,
                                canonical: RecipientSet,
                                highestSeenVersion: Int) throws {
@@ -191,7 +173,6 @@ public func storeDecoder() -> JSONDecoder {
     return decoder
 }
 
-/// One variable's worth of the plan for turning the legacy blob into the store.
 public struct PlannedVariable: Equatable, Sendable {
     public let path: String
     public let payload: VariablePayload
@@ -204,8 +185,6 @@ public struct PlannedVariable: Equatable, Sendable {
     }
 }
 
-/// Maps the legacy `KEY=VALUE` map onto store files. Pure, so the migration can
-/// be inspected and diffed before anything is written.
 public func migrationPlan(entries: [String: String],
                           salt: Data,
                           recipients: RecipientSet,
