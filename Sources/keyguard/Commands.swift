@@ -30,19 +30,21 @@ func commandGet(_ arguments: [String]) {
 
 func commandSet(name: String, value: String) {
     let session = attempt { try Session.make() }
-    let unlocked = attempt { try session.unlock(reason: "Save \(name)") }
+    let unlocked = attempt { try session.unlock(reason: "Save \(name)", requireService: true) }
 
     if unlocked.index.entries[name] != nil, isInteractive, !confirmOverwrite(name) {
         fail("Cancelled")
     }
     _ = attempt { try session.store.put(name: name, value: value, tier: .high, index: unlocked.index) }
+    attempt { try session.pushAfterWrite() }
     print("Set '\(name)'")
 }
 
 func commandDelete(name: String) {
     let session = attempt { try Session.make() }
-    let unlocked = attempt { try session.unlock(reason: "Delete \(name)") }
+    let unlocked = attempt { try session.unlock(reason: "Delete \(name)", requireService: true) }
     _ = attempt { try session.store.remove(name: name, index: unlocked.index) }
+    attempt { try session.pushAfterWrite() }
     print("Deleted '\(name)'")
 }
 
@@ -50,7 +52,7 @@ func commandRename(from old: String, to new: String, force: Bool) {
     guard old != new else { fail("Source and destination must differ") }
 
     let session = attempt { try Session.make() }
-    let unlocked = attempt { try session.unlock(reason: "Rename \(old) to \(new)") }
+    let unlocked = attempt { try session.unlock(reason: "Rename \(old) to \(new)", requireService: true) }
 
     guard let entry = unlocked.index.entries[old] else { fail("Key '\(old)' not found") }
     if unlocked.index.entries[new] != nil, !force {
@@ -64,6 +66,7 @@ func commandRename(from old: String, to new: String, force: Bool) {
         try session.store.put(name: new, value: value, tier: entry.tier, index: unlocked.index)
     }
     _ = attempt { try session.store.remove(name: old, index: afterPut) }
+    attempt { try session.pushAfterWrite() }
     print("Renamed '\(old)' to '\(new)'")
 }
 
@@ -95,7 +98,7 @@ func commandImport(path: String, force: Bool) {
     guard !incoming.isEmpty else { fail("No KEY=VALUE pairs found in \(path)") }
 
     let session = attempt { try Session.make() }
-    var index = attempt { try session.unlock(reason: "Import \(url.lastPathComponent)") }.index
+    var index = attempt { try session.unlock(reason: "Import \(url.lastPathComponent)", requireService: true) }.index
 
     var added = 0, overwritten = 0, skipped = 0
     for name in incoming.keys.sorted() {
@@ -114,6 +117,7 @@ func commandImport(path: String, force: Bool) {
         }
         index = attempt { try session.store.put(name: name, value: incoming[name]!, tier: .high, index: index) }
     }
+    attempt { try session.pushAfterWrite() }
 
     var summary = "Imported from \(url.lastPathComponent): \(added) added"
     if overwritten > 0 { summary += ", \(overwritten) overwritten" }
@@ -137,8 +141,6 @@ func commandVerify() {
     fail("Store at \(session.store.root.path) does not match its manifest")
 }
 
-/// Reuses an identity already in the Keychain rather than minting a second one:
-/// generating a new key while files are sealed to the old one is unrecoverable.
 func establishIdentity(_ session: Session) -> AgeIdentity {
     if let secret = Keychain.loadIdentity() {
         let recipient = attempt {
@@ -171,6 +173,7 @@ func commandInit() {
     establishStore(session, identity: establishIdentity(session))
     print("Created a store at \(session.store.root.path)")
     print("Pinned the recipient set at \(session.recipientsFile.path)")
+    seedService(session)
 }
 
 func commandMigrate(force: Bool) {
@@ -201,9 +204,6 @@ func commandMigrate(force: Bool) {
         index = attempt { try session.store.put(name: name, value: entries[name]!, tier: .high, index: index) }
     }
 
-    // Read the whole store back the way a normal `get` would, from a freshly
-    // loaded index. Nothing is reported as migrated until every value has
-    // survived that trip.
     let reloaded = attempt { try session.store.loadIndex(identity: identity.secret) }
     let readBack = attempt {
         try session.store.values(of: Array(entries.keys), index: reloaded, identity: identity.secret)
@@ -222,6 +222,7 @@ func commandMigrate(force: Bool) {
 
     print("Migrated \(entries.count) secrets to \(session.store.root.path)")
     print("Verified: every value read back identically and the manifest matches.")
+    seedService(session)
     print("")
     print("The old file and its Keychain key are untouched, so reinstalling the previous keyguard")
     print("is a complete rollback. Delete this only once you are satisfied:")
@@ -261,5 +262,38 @@ func commandClear() {
     print("Cleared the store at \(session.store.root.path) and its identity")
     if LegacyStore.exists(at: session.legacyFile) {
         print("Left the pre-age secrets file at \(session.legacyFile.path) alone")
+    }
+}
+
+func commandPush() {
+    let session = attempt { try Session.make() }
+    guard let sync = session.sync else { fail("No store service configured. Set \(Locations.storeURLVariable).") }
+    guard session.store.exists else { fail(session.notInitialisedMessage) }
+    switch attempt({ try sync.push() }) {
+    case .pushed(let version): print("Pushed to the store service; now at version \(version)")
+    case .upToDate: print("The store service is already up to date")
+    case .remoteEmpty, .pulled: break
+    }
+}
+
+func commandPull() {
+    let session = attempt { try Session.make() }
+    guard let sync = session.sync else { fail("No store service configured. Set \(Locations.storeURLVariable).") }
+    switch attempt({ try sync.pull() }) {
+    case .pulled(let version): print("Pulled from the store service; local cache now at version \(version)")
+    case .upToDate: print("Already up to date with the store service")
+    case .remoteEmpty: print("The store service has no store yet. Run 'keyguard push' to seed it")
+    case .pushed: break
+    }
+}
+
+func seedService(_ session: Session) {
+    guard let sync = session.sync else { return }
+    do {
+        if case .pushed(let version) = try sync.push() {
+            print("Seeded the store service at version \(version)")
+        }
+    } catch {
+        fputs("Could not reach the store service to seed it. Run 'keyguard push' when it is reachable.\n", stderr)
     }
 }

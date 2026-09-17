@@ -342,6 +342,28 @@ export KEYGUARD_RECIPIENTS_FILE=~/.keyguard/recipients   # keep this one local, 
 
 Set this in your shell profile before running `make install` — the value is baked into the launchd plist automatically so the server always uses the correct path.
 
+## Store service (remote sync)
+
+keyguard is local-only by default: the on-disk store is authoritative and nothing touches the network. Set `KEYGUARD_STORE_URL` and keyguard treats that store as a cache of the service, which becomes the source of truth. Unset it and every command behaves exactly as before.
+
+```bash
+export KEYGUARD_STORE_URL=https://unlock.example.ts.net
+```
+
+The service only ever holds ciphertext: the same `index.age` and `vars/*.age` files, never `meta.json` and never a key, so it can sync secrets it cannot read. keyguard still decrypts locally behind Touch ID.
+
+- **Reads** (`get`, `list`, `export`) pull first. One request compares versions; only a store that moved fetches the files that changed. An unreachable service falls back to the local cache.
+- **Writes** (`set`, `delete`, `mv`, `import`) push after the local write, under the version the cache was based on, so a store changed elsewhere becomes a conflict to re-run rather than a lost update. Offline, a write refuses instead of letting the cache drift ahead of the service.
+- `keyguard push` seeds the service from the local store or force-sends local changes; `keyguard pull` refreshes the cache. `init` and `migrate` seed a configured service automatically.
+
+Seed a new service once, from the machine that already holds the store:
+
+```bash
+keyguard push    # uploads index.age and every vars/*.age, establishing version 1
+```
+
+Authentication is the tailnet, not a token: the service trusts a `Tailscale-User-Login` header that its Tailscale serve front end sets for your own devices and strips from inbound requests, so keyguard sends nothing. For direct access without that front end, such as local testing, set `KEYGUARD_STORE_IDENTITY` to supply the header.
+
 ## Access log
 
 Every successful secret read and successful bridge call writes one line to `~/.keyguard/access.log`:

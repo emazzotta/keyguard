@@ -5,9 +5,6 @@ import Darwin
 import Glibc
 #endif
 
-/// Reads and writes the on-disk store. Foundation-only so the layout, the
-/// atomic-rename discipline and the meta bookkeeping are exercised against
-/// real files and a real `age` rather than reasoned about.
 public struct Store {
     public let root: URL
     private let runner: AgeRunner
@@ -28,8 +25,6 @@ public struct Store {
         FileManager.default.fileExists(atPath: indexURL.path)
     }
 
-    // MARK: - Reading
-
     public func loadIndex(identity: String) throws -> StoreIndex {
         let plaintext = try Padding.unpad(try runner.decrypt(at: indexURL.path, identity: identity))
         let index = try storeDecoder().decode(StoreIndex.self, from: plaintext)
@@ -39,8 +34,6 @@ public struct Store {
         return index
     }
 
-    /// Resolves every name before decrypting any of them, so a typo fails
-    /// before a prompt rather than after several successful reads.
     public func values(of names: [String], index: StoreIndex, identity: String) throws -> [String: String] {
         let missing = names.filter { index.entries[$0] == nil }
         guard missing.isEmpty else { throw StoreError.unknownVariables(missing.sorted()) }
@@ -59,9 +52,6 @@ public struct Store {
         try storeDecoder().decode(StoreMeta.self, from: try Data(contentsOf: metaURL))
     }
 
-    /// Hashes what is on disk and compares it with `meta.json`. Cheap because
-    /// the files are small, and it is the only thing that notices a Drive
-    /// conflict copy or a half-applied write.
     public func integrity() throws -> IntegrityReport {
         let meta = try loadMeta()
         var actual: [String: String] = [:]
@@ -71,7 +61,21 @@ public struct Store {
         return checkIntegrity(meta: meta, actual: actual)
     }
 
-    // MARK: - Writing
+    public func remoteFiles() throws -> [String: Data] {
+        var files: [String: Data] = [:]
+        for path in try relativeFilePaths() where path != storeMetaFile {
+            files[path] = try Data(contentsOf: url(for: path))
+        }
+        return files
+    }
+
+    public func rebuildMeta() throws {
+        var files: [String: String] = [:]
+        for path in try relativeFilePaths() where path != storeMetaFile {
+            files[path] = hex(digest(try Data(contentsOf: url(for: path))))
+        }
+        try writeMeta(files: files)
+    }
 
     public func create(salt: Data, recipients: RecipientSet, identity: String) throws {
         try FileManager.default.createDirectory(
@@ -81,8 +85,6 @@ public struct Store {
         try writeMeta(files: [storeIndexFile: try hashOf(indexURL)])
     }
 
-    /// Returns the index the caller should keep; the one passed in is stale the
-    /// moment this succeeds.
     public func put(name: String,
                     value: String,
                     tier: Tier,
@@ -121,8 +123,6 @@ public struct Store {
         return updated
     }
 
-    // MARK: - Internals
-
     private func writeIndex(_ index: StoreIndex, recipients: RecipientSet) throws {
         let everyRecipient = Set(recipients.tiers.values.flatMap { $0 }).sorted()
         try encrypt(Padding.pad(try storeEncoder().encode(index)), to: everyRecipient, at: indexURL)
@@ -136,9 +136,6 @@ public struct Store {
         hex(digest(try Data(contentsOf: url)))
     }
 
-    /// age writes straight to its `-o` path, so it lands beside the target and
-    /// is renamed into place: a crash mid-encrypt must not truncate the file
-    /// that currently holds the only copy of a secret.
     private func encrypt(_ plaintext: Data, to recipients: [String], at destination: URL) throws {
         let staged = destination.appendingPathExtension("tmp")
         try FileManager.default.createDirectory(

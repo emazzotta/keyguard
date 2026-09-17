@@ -18,8 +18,12 @@ readonly SHIM_MODULES=(Security LocalAuthentication CryptoKit Darwin)
 passes=0
 failures=0
 work=""
+service_pid=""
 
-clean_up() { [ -n "$work" ] && /bin/rm -rf "$work"; }
+clean_up() {
+    [ -n "$service_pid" ] && kill "$service_pid" 2>/dev/null
+    [ -n "$work" ] && /bin/rm -rf "$work"
+}
 
 pass() { printf '  \xe2\x9c\x93 %s\n' "$1"; passes=$((passes + 1)); }
 fail() { printf '  \xe2\x9c\x97 %s: %s\n' "$1" "$2"; failures=$((failures + 1)); }
@@ -99,6 +103,72 @@ pinned["tiers"]["high"].append("age1" + "q" * 55)
 with open(path, "w") as handle:
     json.dump(pinned, handle)
 PY
+}
+
+service_meta_field() {
+    curl -s -H "Tailscale-User-Login: tester" "$1/store/meta" \
+        | python3 -c "import sys, json; d = json.load(sys.stdin); print($2)"
+}
+
+remote_sync_tests() {
+    local keyguard="$1"
+    local server_py port url ready
+    server_py="${KEYGUARD_STORE_SERVER:-$REPO_ROOT/../personal-infra/apps/unlock/server/store_server.py}"
+
+    if [ ! -f "$server_py" ]; then
+        echo "  - store_server.py not found, skipping ($server_py)"
+        return 0
+    fi
+
+    mkdir -p "$work/service"
+    port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+    url="http://127.0.0.1:$port"
+    STORE_ROOT="$work/service" STORE_PORT="$port" python3 "$server_py" >/dev/null 2>&1 &
+    service_pid=$!
+
+    export KEYGUARD_STORE_URL="$url"
+    export KEYGUARD_STORE_IDENTITY="tester"
+
+    ready=0
+    for _ in $(seq 1 50); do
+        if curl -sf -H "Tailscale-User-Login: tester" "$url/store/meta" >/dev/null 2>&1; then ready=1; break; fi
+        sleep 0.1
+    done
+    assert_equals "should reach the store service" "1" "$ready"
+    if [ "$ready" != "1" ]; then
+        kill "$service_pid" 2>/dev/null; service_pid=""
+        unset KEYGUARD_STORE_URL KEYGUARD_STORE_IDENTITY
+        return 0
+    fi
+
+    assert_contains "should seed the service on first push" "$("$keyguard" push 2>&1)" "version 1"
+    assert_equals "should hold index.age plus one file per variable" \
+        "5" "$(service_meta_field "$url" 'len(d["files"])')"
+    assert_contains "should no-op a second push" "$("$keyguard" push 2>&1)" "already up to date"
+
+    /bin/rm -rf "$work/drive/keyguard-store" "$work/home/.keyguard/remote-version"
+    assert_equals "should pull a value from the service when the cache is gone" \
+        "jira-value" "$("$keyguard" get JIRA_TOKEN)"
+    assert_equals "should rebuild every name from the service" \
+        "GITHUB_TOKEN
+JIRA_TOKEN
+SSH_KEY
+WEIRD" "$("$keyguard" list)"
+    assert_contains "should verify the rebuilt store" "$("$keyguard" verify 2>&1)" "is intact"
+
+    printf 'remote-value' | "$keyguard" set REMOTE_KEY >/dev/null 2>&1
+    assert_equals "should push a new secret to the service" "2" "$(service_meta_field "$url" 'd["version"]')"
+    assert_equals "should read the pushed secret back" "remote-value" "$("$keyguard" get REMOTE_KEY)"
+
+    kill "$service_pid" 2>/dev/null
+    wait "$service_pid" 2>/dev/null
+    service_pid=""
+    assert_equals "should refuse a write while the service is unreachable" \
+        "1" "$(printf x | "$keyguard" set OFFLINE_KEY >/dev/null 2>&1; echo $?)"
+    assert_equals "should still read from the local cache while the service is unreachable" \
+        "jira-value" "$("$keyguard" get JIRA_TOKEN)"
+
+    unset KEYGUARD_STORE_URL KEYGUARD_STORE_IDENTITY
 }
 
 main() {
@@ -198,6 +268,10 @@ WEIRD" "$("$keyguard" list)"
         "1" "$("$keyguard" get RENAMED >/dev/null 2>&1; echo $?)"
     assert_contains "should stay intact across writes" "$("$keyguard" verify 2>&1)" "is intact"
     assert_contains "should name a key it does not hold" "$("$keyguard" get NOPE 2>&1)" "Keys not found: NOPE"
+
+    echo ""
+    echo "store service sync"
+    remote_sync_tests "$keyguard"
 
     echo ""
     echo "recipient set integrity"

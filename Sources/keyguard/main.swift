@@ -3,9 +3,6 @@ import Foundation
 import KeyguardCore
 import Security
 
-// Mirrors keyguard_server.config.BRIDGE_CONFIG_PATH - the CLI confirms a claimed
-// endpoint against the same file the server dispatches from, so the prompt can
-// only ever name a command that is actually configured.
 let BRIDGE_CONFIG_FILE: URL = {
     if let custom = ProcessInfo.processInfo.environment["KEYGUARD_BRIDGE_CONFIG_FILE"] {
         return URL(fileURLWithPath: NSString(string: custom).expandingTildeInPath)
@@ -61,6 +58,8 @@ func printUsage() {
                                      --force overwrites existing keys without prompting
       export                       Print all secrets in KEY=VALUE format
       verify                       Check the store against its manifest
+      push                         Send local store changes to the service
+      pull                         Refresh the local store from the service
       init                         Create an empty store
       migrate [--force]            Convert a pre-age secrets file into the store
       import-key [IDENTITY]        Import an age identity into the Keychain
@@ -72,6 +71,8 @@ func printUsage() {
       KEYGUARD_STORE               Store directory. Defaults to a 'keyguard-store'
                                    directory beside KEYGUARD_SECRETS_FILE, otherwise
                                    ~/.keyguard/store
+      KEYGUARD_STORE_URL           Store service to sync against, opt-in. Unset is
+                                   local-only, exactly as keyguard worked before it.
       KEYGUARD_SECRETS_FILE        Pre-age secrets file, read only by 'migrate'
       KEYGUARD_RECIPIENTS_FILE     Pinned recipient set (~/.keyguard/recipients)
       KEYGUARD_AGE_BIN             Full path to the age binary
@@ -87,17 +88,12 @@ func printUsage() {
     fputs(text + "\n", stderr)
 }
 
-// MARK: - Dispatch
-
 let args = CommandLine.arguments
 guard args.count >= 2 else {
     printUsage()
     exit(1)
 }
 
-// Answered before anything else and kept out of --help: the shell completion
-// calls this on every TAB, so it must never prompt, never touch the store and
-// never appear as a user-facing option.
 if args[1] == "--complete" {
     Completion.values(field: args.count > 2 ? args[2] : "",
                       argument: args.count > 3 ? args[3] : nil).forEach { print($0) }
@@ -157,6 +153,12 @@ case "import":
 
 case "verify":
     commandVerify()
+
+case "push":
+    commandPush()
+
+case "pull":
+    commandPull()
 
 case "init":
     commandInit()

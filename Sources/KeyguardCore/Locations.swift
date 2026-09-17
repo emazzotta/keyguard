@@ -4,13 +4,22 @@ public enum Locations {
     public static let storeVariable = "KEYGUARD_STORE"
     public static let legacySecretsVariable = "KEYGUARD_SECRETS_FILE"
     public static let recipientsVariable = "KEYGUARD_RECIPIENTS_FILE"
+    public static let storeURLVariable = "KEYGUARD_STORE_URL"
+    public static let identityVariable = "KEYGUARD_STORE_IDENTITY"
 
     public static let storeDirectoryName = "keyguard-store"
 
-    /// Falls back to a directory beside the legacy secrets file rather than to
-    /// the home directory: that file already lives wherever the user keeps
-    /// their backed-up secrets, and silently relocating the store out of it
-    /// would drop the off-machine copy without saying so.
+    public static func storeURL(environment: [String: String]) -> URL? {
+        guard let raw = environment[storeURLVariable], !raw.isEmpty else { return nil }
+        return URL(string: raw)
+    }
+
+    public static func remoteVersionFile(environment: [String: String], home: String) -> URL {
+        recipientsFile(environment: environment, home: home)
+            .deletingLastPathComponent()
+            .appendingPathComponent("remote-version")
+    }
+
     public static func storeRoot(environment: [String: String], home: String) -> URL {
         if let explicit = environment[storeVariable], !explicit.isEmpty {
             return URL(fileURLWithPath: expandTilde(explicit, home: home))
@@ -23,8 +32,6 @@ public enum Locations {
         return URL(fileURLWithPath: home).appendingPathComponent(".keyguard/store")
     }
 
-    /// Never derived from the secrets file. The pinned copy has to be the one
-    /// an attacker who reaches the synced store cannot touch.
     public static func recipientsFile(environment: [String: String], home: String) -> URL {
         if let explicit = environment[recipientsVariable], !explicit.isEmpty {
             return URL(fileURLWithPath: expandTilde(explicit, home: home))

@@ -2,15 +2,13 @@ import CryptoKit
 import Foundation
 import KeyguardCore
 
-/// Resolves where everything lives and opens the store. One instance per
-/// invocation, and `unlock` prompts exactly once however many variables the
-/// command goes on to read - `source envify A B C D` must stay one prompt.
 struct Session {
     let store: Store
     let recipientsFile: URL
     let legacyFile: URL
     let runner: AgeRunner
     let keygenBinary: String
+    let sync: StoreSync?
 
     static let sha256: DigestFunction = { Data(SHA256.hash(data: $0)) }
 
@@ -32,19 +30,30 @@ struct Session {
         }
 
         let runner = AgeRunner(binary: age)
+        let store = Store(root: Locations.storeRoot(environment: environment, home: home),
+                          runner: runner, digest: sha256)
+
+        var sync: StoreSync?
+        if let url = Locations.storeURL(environment: environment) {
+            let transport = URLSessionTransport(baseURL: url, identity: environment[Locations.identityVariable])
+            sync = StoreSync(store: store,
+                             remote: RemoteStore(transport: transport),
+                             digest: sha256,
+                             versionURL: Locations.remoteVersionFile(environment: environment, home: home))
+        }
+
         return Session(
-            store: Store(root: Locations.storeRoot(environment: environment, home: home),
-                         runner: runner,
-                         digest: sha256),
+            store: store,
             recipientsFile: Locations.recipientsFile(environment: environment, home: home),
             legacyFile: Locations.legacySecretsFile(environment: environment, home: home),
             runner: runner,
-            keygenBinary: keygen
+            keygenBinary: keygen,
+            sync: sync
         )
     }
 
-    /// The single Touch ID prompt for the whole invocation.
-    func unlock(reason: String) throws -> (identity: String, index: StoreIndex) {
+    func unlock(reason: String, requireService: Bool = false) throws -> (identity: String, index: StoreIndex) {
+        try refresh(requireService: requireService)
         guard store.exists else { throw KeyguardError.message(notInitialisedMessage) }
 
         authenticate(reason: reason)
@@ -62,6 +71,39 @@ struct Session {
                                canonical: index.recipients,
                                highestSeenVersion: pinned.version)
         return (identity, index)
+    }
+
+    func pushAfterWrite() throws {
+        guard let sync else { return }
+        do {
+            _ = try sync.push()
+        } catch RemoteStoreError.conflict(let current) {
+            _ = try? sync.pull()
+            throw KeyguardError.message("""
+            The store changed on the service (now version \(current)) while you were writing, so the \
+            change was not applied. The local cache has been restored; re-run the command.
+            """)
+        } catch let error as RemoteStoreError {
+            throw KeyguardError.message("Could not save to the store service (\(error)). Re-run when it is reachable.")
+        }
+    }
+
+    private func refresh(requireService: Bool) throws {
+        guard let sync else { return }
+        do {
+            if case .remoteEmpty = try sync.pull() {
+                fputs("The store service has no store yet; run 'keyguard push' to seed it.\n", stderr)
+            }
+        } catch let error as RemoteStoreError {
+            guard case .unreachable = error else {
+                throw KeyguardError.message("Store service error: \(error)")
+            }
+            if requireService {
+                throw KeyguardError.message(
+                    "The store service is unreachable, so nothing was written. Try again on the tailnet.")
+            }
+            fputs("Store service unreachable; reading the local cache.\n", stderr)
+        }
     }
 
     func loadPinned() throws -> RecipientSet {
