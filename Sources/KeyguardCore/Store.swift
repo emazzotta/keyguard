@@ -17,6 +17,16 @@ public struct RecipientSet: Codable, Equatable, Sendable {
     public func recipients(for tier: Tier) -> [String] {
         (tiers[tier.rawValue] ?? []).sorted()
     }
+
+    public func adding(_ recipient: String, to tiersToChange: [Tier]) -> RecipientSet {
+        var updated = tiers
+        for tier in tiersToChange {
+            var list = updated[tier.rawValue] ?? []
+            if !list.contains(recipient) { list.append(recipient) }
+            updated[tier.rawValue] = list.sorted()
+        }
+        return RecipientSet(version: version + 1, tiers: updated)
+    }
 }
 
 public struct IndexEntry: Codable, Equatable, Sendable {

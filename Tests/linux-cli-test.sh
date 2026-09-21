@@ -274,6 +274,25 @@ WEIRD" "$("$keyguard" list)"
     remote_sync_tests "$keyguard"
 
     echo ""
+    echo "add-recipient"
+    age-keygen -o "$work/recip2.key" 2>/dev/null
+    local recip2
+    recip2="$(age-keygen -y "$work/recip2.key" 2>/dev/null)"
+    output="$("$keyguard" add-recipient "$recip2" --tier high 2>&1)"
+    assert_contains "should report the bumped recipient-set version" "$output" "version 2"
+    assert_equals "should still read a secret as the owner after reseal" \
+        "jira-value" "$("$keyguard" get JIRA_TOKEN)"
+    assert_contains "should stay intact after reseal" "$("$keyguard" verify 2>&1)" "is intact"
+    assert_equals "should record version 2 in the pinned recipient set" "2" \
+        "$(python3 -c "import json; print(json.load(open('$KEYGUARD_RECIPIENTS_FILE'))['version'])")"
+    local varfile
+    varfile="$(find "$work/drive/keyguard-store/vars" -name '*.age' | head -1)"
+    assert_equals "should let the new recipient decrypt a re-sealed var" "0" \
+        "$(age -d -i "$work/recip2.key" "$varfile" >/dev/null 2>&1; echo $?)"
+    assert_equals "should refuse to add a recipient already present" "1" \
+        "$("$keyguard" add-recipient "$recip2" --tier high >/dev/null 2>&1; echo $?)"
+
+    echo ""
     echo "recipient set integrity"
     poison_pinned_recipients "$KEYGUARD_RECIPIENTS_FILE"
     output="$("$keyguard" get JIRA_TOKEN 2>&1)"

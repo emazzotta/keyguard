@@ -2,7 +2,7 @@ import Foundation
 
 public enum Completion {
     public static let commands = [
-        "clear", "delete", "export", "export-key", "get", "help", "import",
+        "add-recipient", "clear", "delete", "export", "export-key", "get", "help", "import",
         "import-key", "init", "list", "migrate", "mv", "pull", "push", "rename", "rm", "set", "verify"
     ]
 
@@ -11,6 +11,7 @@ public enum Completion {
         case "get": return ["--bridge-endpoint", "--cache-duration"]
         case "list": return ["--cache-duration"]
         case "import", "migrate", "mv", "rename": return ["--force"]
+        case "add-recipient": return ["--tier"]
         default: return []
         }
     }

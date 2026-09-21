@@ -123,6 +123,26 @@ public struct Store {
         return updated
     }
 
+    public func reseal(to recipients: RecipientSet, identity: String) throws -> StoreIndex {
+        let index = try loadIndex(identity: identity)
+        try resealVariables(to: recipients, from: index, identity: identity)
+        _ = try values(of: Array(index.entries.keys), index: index, identity: identity)
+        let updated = StoreIndex(salt: index.salt, recipients: recipients, entries: index.entries)
+        try writeIndex(updated, recipients: recipients)
+        try rebuildMeta()
+        return updated
+    }
+
+    private func resealVariables(to recipients: RecipientSet, from index: StoreIndex,
+                                 identity: String) throws {
+        for (name, entry) in index.entries
+            where recipients.recipients(for: entry.tier) != index.recipients.recipients(for: entry.tier) {
+            let value = try values(of: [name], index: index, identity: identity)[name]!
+            let payload = Padding.pad(try storeEncoder().encode(VariablePayload(name: name, value: value)))
+            try encrypt(payload, to: recipients.recipients(for: entry.tier), at: url(for: entry.file))
+        }
+    }
+
     private func writeIndex(_ index: StoreIndex, recipients: RecipientSet) throws {
         let everyRecipient = Set(recipients.tiers.values.flatMap { $0 }).sorted()
         try encrypt(Padding.pad(try storeEncoder().encode(index)), to: everyRecipient, at: indexURL)

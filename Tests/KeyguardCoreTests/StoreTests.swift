@@ -116,6 +116,17 @@ struct StoreTestRunner {
         checkEqual("should return the low tier sorted", sampleRecipients().recipients(for: .low), [devbox, macbook].sorted())
         checkEqual("should return nothing for a tier it does not define",
                    RecipientSet(version: 1, tiers: ["low": [macbook]]).recipients(for: .high), [])
+        checkEqual("should add a recipient to the named tier",
+                   sampleRecipients().adding(devbox, to: [.high]).recipients(for: .high), [devbox, macbook].sorted())
+        checkEqual("should leave an unnamed tier untouched when adding",
+                   sampleRecipients().adding("age1new", to: [.high]).recipients(for: .low), [devbox, macbook].sorted())
+        checkEqual("should bump the recipient-set version when adding",
+                   sampleRecipients(version: 4).adding(devbox, to: [.high]).version, 5)
+        checkEqual("should not duplicate a recipient already in the tier",
+                   sampleRecipients().adding(macbook, to: [.high]).recipients(for: .high), [macbook])
+        checkEqual("should add to several tiers at once",
+                   Set(sampleRecipients().adding("age1new", to: [.high, .low]).recipients(for: .low)),
+                   Set([macbook, devbox, "age1new"]))
 
         print("\nverify(payload:)")
         let payload = VariablePayload(name: "JIRA_TOKEN", value: "s3cret")

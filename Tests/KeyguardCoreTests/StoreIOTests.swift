@@ -223,7 +223,28 @@ struct StoreIOTestRunner {
         }
         check("should keep integrity clean across awkward values", ((try? awkward.integrity())?.isClean) ?? false)
 
-        for store in [empty, store, tampered, awkward] {
+        print("\nreseal (add a recipient)")
+        let rotated = freshStore()
+        var rotatedIndex = try! rotated.loadIndex(identity: macbook.secret)
+        rotatedIndex = try! rotated.put(name: "HIGH_VAR", value: "high-value", tier: .high, index: rotatedIndex)
+        rotatedIndex = try! rotated.put(name: "LOW_VAR", value: "low-value", tier: .low, index: rotatedIndex)
+        let newSet = recipients.adding(stranger.recipient, to: [.high])
+        let afterReseal = try! rotated.reseal(to: newSet, identity: macbook.secret)
+        checkEqual("should bump the recipient-set version in the index", afterReseal.recipients.version, 2)
+        checkEqual("should record the added recipient in the high tier",
+                   afterReseal.recipients.recipients(for: .high), [macbook.recipient, stranger.recipient].sorted())
+        check("should let the new recipient decrypt a re-sealed high-tier secret",
+              (try? rotated.values(of: ["HIGH_VAR"], index: afterReseal, identity: stranger.secret))?["HIGH_VAR"] == "high-value")
+        check("should keep an untouched low-tier secret away from the new recipient",
+              (try? rotated.values(of: ["LOW_VAR"], index: afterReseal, identity: stranger.secret)) == nil)
+        checkEqual("should keep the owner reading every secret after reseal",
+                   (try? rotated.values(of: ["HIGH_VAR", "LOW_VAR"], index: afterReseal, identity: macbook.secret)) ?? [:],
+                   ["HIGH_VAR": "high-value", "LOW_VAR": "low-value"])
+        check("should keep integrity clean after reseal", ((try? rotated.integrity())?.isClean) ?? false)
+        check("should let the new recipient open the index too",
+              (try? rotated.loadIndex(identity: stranger.secret)) != nil)
+
+        for store in [empty, store, tampered, awkward, rotated] {
             try? FileManager.default.removeItem(at: store.root)
         }
 

@@ -70,6 +70,27 @@ func commandRename(from old: String, to new: String, force: Bool) {
     print("Renamed '\(old)' to '\(new)'")
 }
 
+func commandAddRecipient(recipient: String, tiers: [Tier]) {
+    guard recipient.hasPrefix("age1") else {
+        fail("Invalid recipient: expected an age1... public key")
+    }
+    let session = attempt { try Session.make() }
+    let unlocked = attempt { try session.unlock(reason: "Add a store recipient", requireService: true) }
+
+    let current = unlocked.index.recipients
+    let tierLabel = tiers.map { $0.rawValue }.sorted().joined(separator: ", ")
+    guard !tiers.allSatisfy({ current.recipients(for: $0).contains(recipient) }) else {
+        fail("That recipient is already in tier(s) \(tierLabel)")
+    }
+
+    let updated = current.adding(recipient, to: tiers)
+    _ = attempt { try session.store.reseal(to: updated, identity: unlocked.identity) }
+    attempt { try writePinnedRecipients(updated, to: session.recipientsFile) }
+    attempt { try session.pushAfterWrite() }
+    print("Added the recipient to tier(s) \(tierLabel); recipient set is now version \(updated.version)")
+    print("Update the pinned recipient set on every other device that reads this store.")
+}
+
 func commandList(_ arguments: [String]) {
     let parsed = parseArgs(arguments)
     let session = attempt { try Session.make() }
