@@ -3,7 +3,7 @@ import Foundation
 public enum Completion {
     public static let commands = [
         "add-recipient", "clear", "delete", "export", "export-key", "get", "help", "import",
-        "import-key", "init", "list", "migrate", "mv", "pull", "push", "rename", "rm", "set", "verify"
+        "import-key", "init", "list", "migrate", "mv", "pull", "push", "remove-recipient", "rename", "rm", "set", "verify"
     ]
 
     public static func flags(forCommand command: String) -> [String] {
@@ -11,7 +11,7 @@ public enum Completion {
         case "get": return ["--bridge-endpoint", "--cache-duration"]
         case "list": return ["--cache-duration"]
         case "import", "migrate", "mv", "rename": return ["--force"]
-        case "add-recipient": return ["--tier"]
+        case "add-recipient", "remove-recipient": return ["--tier"]
         default: return []
         }
     }

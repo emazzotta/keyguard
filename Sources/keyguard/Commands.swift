@@ -70,24 +70,70 @@ func commandRename(from old: String, to new: String, force: Bool) {
     print("Renamed '\(old)' to '\(new)'")
 }
 
-func commandAddRecipient(recipient: String, tiers: [Tier]) {
-    guard recipient.hasPrefix("age1") else {
-        fail("Invalid recipient: expected an age1... public key")
+func parseRecipientCommand(_ arguments: [String], command: String) -> (recipient: String, tiers: [Tier]) {
+    var tierArg = "high,low"
+    var positional: [String] = []
+    var cursor = 0
+    while cursor < arguments.count {
+        if arguments[cursor] == "--tier", cursor + 1 < arguments.count {
+            tierArg = arguments[cursor + 1]
+            cursor += 2
+        } else {
+            positional.append(arguments[cursor])
+            cursor += 1
+        }
     }
+    guard positional.count == 1 else {
+        fail("Usage: keyguard \(command) <age1-recipient> [--tier high,low]")
+    }
+    let tiers = tierArg.split(separator: ",").map { Tier(rawValue: String($0)) }
+    guard !tiers.contains(nil) else { fail("Invalid --tier: use high, low, or high,low") }
+    guard positional[0].hasPrefix("age1") else { fail("Invalid recipient: expected an age1... public key") }
+    return (positional[0], tiers.compactMap { $0 })
+}
+
+private func tierLabel(_ tiers: [Tier]) -> String {
+    tiers.map(\.rawValue).sorted().joined(separator: ", ")
+}
+
+private func applyRecipients(_ updated: RecipientSet, session: Session, identity: String) {
+    _ = attempt { try session.store.reseal(to: updated, identity: identity) }
+    attempt { try writePinnedRecipients(updated, to: session.recipientsFile) }
+    attempt { try session.pushAfterWrite() }
+}
+
+func commandAddRecipient(recipient: String, tiers: [Tier]) {
     let session = attempt { try Session.make() }
     let unlocked = attempt { try session.unlock(reason: "Add a store recipient", requireService: true) }
 
     let current = unlocked.index.recipients
-    let tierLabel = tiers.map { $0.rawValue }.sorted().joined(separator: ", ")
     guard !tiers.allSatisfy({ current.recipients(for: $0).contains(recipient) }) else {
-        fail("That recipient is already in tier(s) \(tierLabel)")
+        fail("That recipient is already in tier(s) \(tierLabel(tiers))")
     }
 
     let updated = current.adding(recipient, to: tiers)
-    _ = attempt { try session.store.reseal(to: updated, identity: unlocked.identity) }
-    attempt { try writePinnedRecipients(updated, to: session.recipientsFile) }
-    attempt { try session.pushAfterWrite() }
-    print("Added the recipient to tier(s) \(tierLabel); recipient set is now version \(updated.version)")
+    applyRecipients(updated, session: session, identity: unlocked.identity)
+    print("Added the recipient to tier(s) \(tierLabel(tiers)); recipient set is now version \(updated.version)")
+    print("Update the pinned recipient set on every other device that reads this store.")
+}
+
+func commandRemoveRecipient(recipient: String, tiers: [Tier]) {
+    let session = attempt { try Session.make() }
+    let unlocked = attempt { try session.unlock(reason: "Remove a store recipient", requireService: true) }
+    let owner = attempt { try session.runner.recipient(forIdentity: unlocked.identity, keygenBinary: session.keygenBinary) }
+    guard recipient != owner else {
+        fail("That is this Mac's own key; removing it would lock keyguard out of its own store")
+    }
+
+    let current = unlocked.index.recipients
+    guard tiers.contains(where: { current.recipients(for: $0).contains(recipient) }) else {
+        fail("That recipient is not in tier(s) \(tierLabel(tiers))")
+    }
+
+    let updated = current.removing(recipient, from: tiers)
+    applyRecipients(updated, session: session, identity: unlocked.identity)
+    print("Removed the recipient from tier(s) \(tierLabel(tiers)); recipient set is now version \(updated.version)")
+    print("Secrets it could read before may survive in copies it made; rotate the ones that matter.")
     print("Update the pinned recipient set on every other device that reads this store.")
 }
 

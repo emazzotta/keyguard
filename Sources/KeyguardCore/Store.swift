@@ -27,6 +27,14 @@ public struct RecipientSet: Codable, Equatable, Sendable {
         }
         return RecipientSet(version: version + 1, tiers: updated)
     }
+
+    public func removing(_ recipient: String, from tiersToChange: [Tier]) -> RecipientSet {
+        var updated = tiers
+        for tier in tiersToChange {
+            updated[tier.rawValue] = (updated[tier.rawValue] ?? []).filter { $0 != recipient }
+        }
+        return RecipientSet(version: version + 1, tiers: updated)
+    }
 }
 
 public struct IndexEntry: Codable, Equatable, Sendable {

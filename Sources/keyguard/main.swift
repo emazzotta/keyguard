@@ -59,6 +59,8 @@ func printUsage() {
       export                       Print all secrets in KEY=VALUE format
       add-recipient <age1-key>     Add an age recipient to the store and re-encrypt
           [--tier high,low]          Tiers to add it to (default both)
+      remove-recipient <age1-key>  Remove an age recipient and re-encrypt without it
+          [--tier high,low]          Tiers to remove it from (default both)
       verify                       Check the store against its manifest
       push                         Send local store changes to the service
       pull                         Refresh the local store from the service
@@ -144,25 +146,12 @@ case "mv", "rename":
     commandRename(from: positional[0], to: positional[1], force: force)
 
 case "add-recipient":
-    let rest = Array(args.dropFirst(2))
-    var tierArg = "high,low"
-    var positional: [String] = []
-    var cursor = 0
-    while cursor < rest.count {
-        if rest[cursor] == "--tier", cursor + 1 < rest.count {
-            tierArg = rest[cursor + 1]
-            cursor += 2
-        } else {
-            positional.append(rest[cursor])
-            cursor += 1
-        }
-    }
-    guard positional.count == 1 else {
-        fail("Usage: keyguard add-recipient <age1-recipient> [--tier high,low]")
-    }
-    let tiers = tierArg.split(separator: ",").map { Tier(rawValue: String($0)) }
-    guard !tiers.contains(nil) else { fail("Invalid --tier: use high, low, or high,low") }
-    commandAddRecipient(recipient: positional[0], tiers: tiers.compactMap { $0 })
+    let parsed = parseRecipientCommand(Array(args.dropFirst(2)), command: "add-recipient")
+    commandAddRecipient(recipient: parsed.recipient, tiers: parsed.tiers)
+
+case "remove-recipient":
+    let parsed = parseRecipientCommand(Array(args.dropFirst(2)), command: "remove-recipient")
+    commandRemoveRecipient(recipient: parsed.recipient, tiers: parsed.tiers)
 
 case "list":
     commandList(Array(args.dropFirst(2)))

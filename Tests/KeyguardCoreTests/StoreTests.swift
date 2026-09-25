@@ -127,6 +127,16 @@ struct StoreTestRunner {
         checkEqual("should add to several tiers at once",
                    Set(sampleRecipients().adding("age1new", to: [.high, .low]).recipients(for: .low)),
                    Set([macbook, devbox, "age1new"]))
+        checkEqual("should remove a recipient from the named tier",
+                   sampleRecipients().removing(devbox, from: [.low]).recipients(for: .low), [macbook])
+        checkEqual("should leave an unnamed tier untouched when removing",
+                   sampleRecipients().adding(devbox, to: [.high]).removing(devbox, from: [.low]).recipients(for: .high),
+                   [devbox, macbook].sorted())
+        checkEqual("should bump the recipient-set version when removing",
+                   sampleRecipients(version: 4).removing(devbox, from: [.low]).version, 5)
+        checkEqual("should remove from several tiers at once",
+                   sampleRecipients().adding(devbox, to: [.high]).removing(devbox, from: [.high, .low]).tiers,
+                   ["high": [macbook], "low": [macbook]])
 
         print("\nverify(payload:)")
         let payload = VariablePayload(name: "JIRA_TOKEN", value: "s3cret")

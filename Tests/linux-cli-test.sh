@@ -293,6 +293,24 @@ WEIRD" "$("$keyguard" list)"
         "$("$keyguard" add-recipient "$recip2" --tier high >/dev/null 2>&1; echo $?)"
 
     echo ""
+    echo "remove-recipient"
+    output="$("$keyguard" remove-recipient "$recip2" --tier high 2>&1)"
+    assert_contains "should report the bumped recipient-set version after removal" "$output" "version 3"
+    assert_equals "should still read a secret as the owner after removal" \
+        "jira-value" "$("$keyguard" get JIRA_TOKEN)"
+    assert_contains "should stay intact after removal" "$("$keyguard" verify 2>&1)" "is intact"
+    assert_equals "should lock the removed recipient out of a re-sealed var" "1" \
+        "$(age -d -i "$work/recip2.key" "$varfile" >/dev/null 2>&1; echo $?)"
+    assert_equals "should refuse to remove a recipient that is not present" "1" \
+        "$("$keyguard" remove-recipient "$recip2" --tier high >/dev/null 2>&1; echo $?)"
+    local owner
+    owner="$(python3 -c "import json; print(json.load(open('$KEYGUARD_RECIPIENTS_FILE'))['tiers']['low'][0])")"
+    assert_equals "should refuse to remove the owner's own key" "1" \
+        "$("$keyguard" remove-recipient "$owner" >/dev/null 2>&1; echo $?)"
+    assert_contains "should name the owner's key as the reason" \
+        "$("$keyguard" remove-recipient "$owner" 2>&1)" "own key"
+
+    echo ""
     echo "recipient set integrity"
     poison_pinned_recipients "$KEYGUARD_RECIPIENTS_FILE"
     output="$("$keyguard" get JIRA_TOKEN 2>&1)"

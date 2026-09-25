@@ -244,6 +244,20 @@ struct StoreIOTestRunner {
         check("should let the new recipient open the index too",
               (try? rotated.loadIndex(identity: stranger.secret)) != nil)
 
+        print("\nreseal (remove a recipient)")
+        let shrunk = afterReseal.recipients.removing(stranger.recipient, from: [.high])
+        let afterRemoval = try! rotated.reseal(to: shrunk, identity: macbook.secret)
+        checkEqual("should drop the removed recipient from the high tier",
+                   afterRemoval.recipients.recipients(for: .high), [macbook.recipient])
+        check("should lock the removed recipient out of a re-sealed high-tier secret",
+              (try? rotated.values(of: ["HIGH_VAR"], index: afterRemoval, identity: stranger.secret)) == nil)
+        check("should lock the removed recipient out of the index",
+              (try? rotated.loadIndex(identity: stranger.secret)) == nil)
+        checkEqual("should keep the owner reading every secret after removal",
+                   (try? rotated.values(of: ["HIGH_VAR", "LOW_VAR"], index: afterRemoval, identity: macbook.secret)) ?? [:],
+                   ["HIGH_VAR": "high-value", "LOW_VAR": "low-value"])
+        check("should keep integrity clean after removal", ((try? rotated.integrity())?.isClean) ?? false)
+
         for store in [empty, store, tampered, awkward, rotated] {
             try? FileManager.default.removeItem(at: store.root)
         }
