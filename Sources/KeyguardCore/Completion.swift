@@ -6,6 +6,8 @@ public enum Completion {
         "import-key", "init", "list", "migrate", "mv", "pull", "push", "remove-recipient", "rename", "rm", "set", "verify"
     ]
 
+    public static let topLevelFlags = ["--help", "-h"]
+
     public static func flags(forCommand command: String) -> [String] {
         switch command {
         case "get", "list": return ["--cache-duration"]
@@ -18,7 +20,7 @@ public enum Completion {
     public static func values(field: String, argument: String?) -> [String] {
         switch field {
         case "commands": return commands
-        case "flags": return flags(forCommand: argument ?? "")
+        case "flags": return argument.map(flags(forCommand:)) ?? topLevelFlags
         default: return []
         }
     }

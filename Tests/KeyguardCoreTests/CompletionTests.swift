@@ -1,6 +1,6 @@
 import Foundation
 
-private func dispatchedCommands(at path: String) -> Set<String>? {
+private func dispatchedLabels(at path: String) -> Set<String>? {
     guard let source = try? String(contentsOfFile: path, encoding: .utf8),
           let switchStart = source.range(of: "switch args[1] {") else { return nil }
 
@@ -11,7 +11,7 @@ private func dispatchedCommands(at path: String) -> Set<String>? {
         guard trimmed.hasPrefix("case "), trimmed.hasSuffix(":") else { continue }
         for piece in trimmed.dropFirst(5).dropLast().components(separatedBy: ",") {
             let label = piece.trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-            if !label.isEmpty, !label.hasPrefix("-"), label != "default" { found.insert(label) }
+            if !label.isEmpty, label != "default" { found.insert(label) }
         }
     }
     return found
@@ -40,12 +40,22 @@ struct CompletionTestRunner {
         check("should never offer a flag as a command",
               Completion.commands.allSatisfy { !$0.hasPrefix("-") })
 
-        if let dispatched = dispatchedCommands(at: "Sources/keyguard/main.swift") {
+        let dispatched = dispatchedLabels(at: "Sources/keyguard/main.swift")
+        if let dispatched {
+            let commands = dispatched.filter { !$0.hasPrefix("-") }
             let advertised = Set(Completion.commands)
             checkEqual("should offer every command the CLI dispatches",
-                       dispatched.subtracting(advertised).sorted(), [])
+                       commands.subtracting(advertised).sorted(), [])
             checkEqual("should offer nothing the CLI cannot run",
-                       advertised.subtracting(dispatched).sorted(), [])
+                       advertised.subtracting(commands).sorted(), [])
+        } else {
+            print("  - main.swift not readable from here, skipping the drift check")
+        }
+
+        print("\ntop-level flags")
+        if let dispatched {
+            checkEqual("should offer exactly the flags the CLI accepts before a command",
+                       Set(Completion.topLevelFlags), dispatched.filter { $0.hasPrefix("-") })
         } else {
             print("  - main.swift not readable from here, skipping the drift check")
         }
@@ -69,8 +79,8 @@ struct CompletionTestRunner {
                    Completion.values(field: "flags", argument: "get"), ["--cache-duration"])
         checkEqual("should stay silent on an unknown field rather than guess",
                    Completion.values(field: "nonsense", argument: "get"), [])
-        checkEqual("should stay silent when flags is asked without a command",
-                   Completion.values(field: "flags", argument: nil), [])
+        checkEqual("should answer the top-level flags when flags names no command",
+                   Completion.values(field: "flags", argument: nil), Completion.topLevelFlags)
 
         if failures > 0 { fputs("\n\(failures) failure(s)\n", stderr); exit(1) }
         print("\nAll tests passed")
