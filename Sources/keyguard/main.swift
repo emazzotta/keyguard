@@ -3,19 +3,6 @@ import Foundation
 import KeyguardCore
 import Security
 
-let BRIDGE_CONFIG_FILE: URL = {
-    if let custom = ProcessInfo.processInfo.environment["KEYGUARD_BRIDGE_CONFIG_FILE"] {
-        return URL(fileURLWithPath: NSString(string: custom).expandingTildeInPath)
-    }
-    return FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".mac-bridge-endpoints.yaml")
-}()
-
-func configuredBridgeEndpointNames() -> Set<String> {
-    guard let contents = try? String(contentsOf: BRIDGE_CONFIG_FILE, encoding: .utf8) else { return [] }
-    return parseBridgeEndpointNames(contents)
-}
-
 func randomSalt() -> Data {
     var bytes = [UInt8](repeating: 0, count: 32)
     guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
@@ -119,7 +106,7 @@ case "help", "--help", "-h":
 
 case "get":
     guard args.count >= 3 else {
-        fail("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--bridge-endpoint NAME]")
+        fail("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]")
     }
     commandGet(Array(args[2...]))
 

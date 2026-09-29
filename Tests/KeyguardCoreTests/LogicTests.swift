@@ -23,33 +23,6 @@ struct TestRunner {
             }
         }
 
-        func checkOptStr(_ desc: String, _ actual: String?, _ expected: String?) {
-            if actual == expected {
-                print("  ✓ \(desc)")
-            } else {
-                print("  ✗ \(desc): got \(String(describing: actual)), want \(String(describing: expected))")
-                failures += 1
-            }
-        }
-
-        func checkBool(_ desc: String, _ actual: Bool, _ expected: Bool) {
-            if actual == expected {
-                print("  ✓ \(desc)")
-            } else {
-                print("  ✗ \(desc): got \(actual), want \(expected)")
-                failures += 1
-            }
-        }
-
-        func checkSet(_ desc: String, _ actual: Set<String>, _ expected: Set<String>) {
-            if actual == expected {
-                print("  ✓ \(desc)")
-            } else {
-                print("  ✗ \(desc): got \(actual.sorted()), want \(expected.sorted())")
-                failures += 1
-            }
-        }
-
         print("parseEnv")
         checkDict("simple key=value",        parseEnv("KEY=value"),                  ["KEY": "value"])
         checkDict("export prefix",           parseEnv("export KEY=value"),           ["KEY": "value"])
@@ -95,14 +68,11 @@ struct TestRunner {
         checkDict("round-trip multiline",  parseEnv(serializeEnv(["JSON": multiLineJson, "PLAIN": "hello"])),
                                            ["JSON": multiLineJson, "PLAIN": "hello"])
 
-        func checkArgs(_ desc: String, _ actual: ParsedArgs, positional: [String], cacheDuration: Int?, bridgeEndpoint: String? = nil) {
-            let posOk = actual.positional == positional
-            let cacheOk = actual.cacheDuration == cacheDuration
-            let endpointOk = actual.bridgeEndpoint == bridgeEndpoint
-            if posOk && cacheOk && endpointOk {
+        func checkArgs(_ desc: String, _ actual: ParsedArgs, positional: [String], cacheDuration: Int?) {
+            if actual.positional == positional && actual.cacheDuration == cacheDuration {
                 print("  ✓ \(desc)")
             } else {
-                print("  ✗ \(desc): got positional=\(actual.positional) cache=\(String(describing: actual.cacheDuration)) endpoint=\(String(describing: actual.bridgeEndpoint)), want positional=\(positional) cache=\(String(describing: cacheDuration)) endpoint=\(String(describing: bridgeEndpoint))")
+                print("  ✗ \(desc): got positional=\(actual.positional) cache=\(String(describing: actual.cacheDuration)), want positional=\(positional) cache=\(String(describing: cacheDuration))")
                 failures += 1
             }
         }
@@ -117,57 +87,11 @@ struct TestRunner {
         checkArgs("missing duration value",     parseArgs(["--cache-duration"]),            positional: ["--cache-duration"], cacheDuration: nil)
         checkArgs("zero duration",              parseArgs(["--cache-duration", "0"]),       positional: [],              cacheDuration: 0)
         checkArgs("negative duration",          parseArgs(["--cache-duration", "-5"]),      positional: [],              cacheDuration: -5)
-        checkArgs("bridge-endpoint at end",     parseArgs(["KEY", "--bridge-endpoint", "spotify-play"]), positional: ["KEY"], cacheDuration: nil, bridgeEndpoint: "spotify-play")
-        checkArgs("bridge-endpoint at start",   parseArgs(["--bridge-endpoint", "echo", "KEY"]), positional: ["KEY"],  cacheDuration: nil, bridgeEndpoint: "echo")
-        checkArgs("bridge-endpoint with duration", parseArgs(["KEY", "--bridge-endpoint", "echo", "--cache-duration", "60"]), positional: ["KEY"], cacheDuration: 60, bridgeEndpoint: "echo")
-        checkArgs("missing bridge-endpoint value", parseArgs(["--bridge-endpoint"]),        positional: ["--bridge-endpoint"], cacheDuration: nil, bridgeEndpoint: nil)
 
         print("\nbuildReason")
         checkStr("without cache",  buildReason(base: "List secrets", cacheDuration: nil),  "List secrets")
         checkStr("with cache",     buildReason(base: "List secrets", cacheDuration: 120),  "List secrets (cached for 120s)")
         checkStr("with zero",      buildReason(base: "Reveal TOKEN", cacheDuration: 0),    "Reveal TOKEN (cached for 0s)")
-        checkStr("with purpose",   buildReason(base: "Reveal MAC_BRIDGE_TOKEN", cacheDuration: nil, purpose: "bridge endpoint resolve-mcp-start"),
-                                   "Reveal MAC_BRIDGE_TOKEN for bridge endpoint resolve-mcp-start")
-        checkStr("purpose before cache suffix", buildReason(base: "Reveal TOKEN", cacheDuration: 60, purpose: "bridge endpoint echo"),
-                                   "Reveal TOKEN for bridge endpoint echo (cached for 60s)")
-        checkStr("empty purpose ignored", buildReason(base: "Reveal TOKEN", cacheDuration: nil, purpose: ""), "Reveal TOKEN")
-
-        print("\nisValidBridgeEndpointName")
-        checkBool("plain name",            isValidBridgeEndpointName("resolve-mcp-start"), true)
-        checkBool("dots and underscores",  isValidBridgeEndpointName("a.b_c-1"),           true)
-        checkBool("prose rejected",        isValidBridgeEndpointName("routine check"),     false)
-        checkBool("newline rejected",      isValidBridgeEndpointName("echo\nReveal all"),  false)
-        checkBool("empty rejected",        isValidBridgeEndpointName(""),                  false)
-        checkBool("leading dash rejected", isValidBridgeEndpointName("-echo"),             false)
-        checkBool("over length rejected",  isValidBridgeEndpointName(String(repeating: "a", count: 65)), false)
-
-        print("\nparseBridgeEndpointNames")
-        let sampleConfig = """
-        # comment
-        endpoints:
-          spotify-play:
-            command: [osascript, -e, 'tell application "Spotify" to play']
-            method: POST
-          resolve-mcp-start:
-            command: [/Users/me/dotfiles/bin/resolve-mcp-start]
-        other-top-level:
-          ignored:
-            command: [nope]
-        """
-        checkSet("collects endpoint keys", parseBridgeEndpointNames(sampleConfig), ["spotify-play", "resolve-mcp-start"])
-        checkSet("nested option keys excluded", parseBridgeEndpointNames(sampleConfig).intersection(["command", "method"]), [])
-        checkSet("keys after a new top-level block excluded", parseBridgeEndpointNames(sampleConfig).intersection(["ignored"]), [])
-        checkSet("quoted key unwrapped", parseBridgeEndpointNames("endpoints:\n  \"quoted-name\":\n    command: [x]\n"), ["quoted-name"])
-        checkSet("no endpoints block", parseBridgeEndpointNames("other:\n  a: 1\n"), [])
-        checkSet("tabs bail out", parseBridgeEndpointNames("endpoints:\n\tspotify-play:\n"), [])
-        checkSet("empty document", parseBridgeEndpointNames(""), [])
-
-        print("\nbridgePurpose")
-        let configured: Set<String> = ["spotify-play", "resolve-mcp-start"]
-        checkOptStr("configured endpoint named", bridgePurpose(endpoint: "spotify-play", configuredNames: configured), "bridge endpoint spotify-play")
-        checkOptStr("unconfigured endpoint refused", bridgePurpose(endpoint: "not-in-config", configuredNames: configured), nil)
-        checkOptStr("prose refused", bridgePurpose(endpoint: "routine check", configuredNames: configured), nil)
-        checkOptStr("empty config refuses everything", bridgePurpose(endpoint: "spotify-play", configuredNames: []), nil)
 
         if failures > 0 {
             fputs("\n\(failures) failure(s)\n", stderr)

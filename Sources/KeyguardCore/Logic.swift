@@ -44,92 +44,30 @@ public func serializeEnv(_ entries: [String: String]) -> String {
 public struct ParsedArgs {
     public let positional: [String]
     public let cacheDuration: Int?
-    public let bridgeEndpoint: String?
 
-    public init(positional: [String], cacheDuration: Int?, bridgeEndpoint: String? = nil) {
+    public init(positional: [String], cacheDuration: Int?) {
         self.positional = positional
         self.cacheDuration = cacheDuration
-        self.bridgeEndpoint = bridgeEndpoint
     }
 }
 
 public func parseArgs(_ args: [String]) -> ParsedArgs {
     var positional: [String] = []
     var cacheDuration: Int?
-    var bridgeEndpoint: String?
     var i = 0
     while i < args.count {
         if args[i] == "--cache-duration", i + 1 < args.count, let duration = Int(args[i + 1]) {
             cacheDuration = duration
-            i += 2
-        } else if args[i] == "--bridge-endpoint", i + 1 < args.count {
-            bridgeEndpoint = args[i + 1]
             i += 2
         } else {
             positional.append(args[i])
             i += 1
         }
     }
-    return ParsedArgs(positional: positional, cacheDuration: cacheDuration, bridgeEndpoint: bridgeEndpoint)
+    return ParsedArgs(positional: positional, cacheDuration: cacheDuration)
 }
 
-private let bridgeEndpointNameCharacters = CharacterSet(charactersIn:
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
-private let maxBridgeEndpointNameLength = 64
-
-public func isValidBridgeEndpointName(_ name: String) -> Bool {
-    guard !name.isEmpty, name.count <= maxBridgeEndpointNameLength else { return false }
-    guard name.unicodeScalars.allSatisfy(bridgeEndpointNameCharacters.contains) else { return false }
-    guard let first = name.first else { return false }
-    return first.isLetter || first.isNumber
-}
-
-private func endpointKey(fromTrimmed line: String) -> String? {
-    guard let colon = line.firstIndex(of: ":") else { return nil }
-    var key = String(line[line.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
-    let quoted = (key.hasPrefix("\"") && key.hasSuffix("\"")) || (key.hasPrefix("'") && key.hasSuffix("'"))
-    if key.count >= 2, quoted {
-        key = String(key.dropFirst().dropLast())
-    }
-    return isValidBridgeEndpointName(key) ? key : nil
-}
-
-public func parseBridgeEndpointNames(_ yaml: String) -> Set<String> {
-    var names: Set<String> = []
-    var childIndent: Int?
-    var inEndpoints = false
-
-    for line in yaml.components(separatedBy: .newlines) {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-        if line.contains("\t") { return [] }
-
-        let indent = line.prefix(while: { $0 == " " }).count
-        if !inEndpoints {
-            if indent == 0, trimmed == "endpoints:" { inEndpoints = true }
-            continue
-        }
-        if indent == 0 { break }
-
-        if let expected = childIndent, indent != expected { continue }
-        childIndent = indent
-        if let name = endpointKey(fromTrimmed: trimmed) {
-            names.insert(name)
-        }
-    }
-    return names
-}
-
-public func bridgePurpose(endpoint: String, configuredNames: Set<String>) -> String? {
-    guard isValidBridgeEndpointName(endpoint), configuredNames.contains(endpoint) else { return nil }
-    return "bridge endpoint \(endpoint)"
-}
-
-public func buildReason(base: String, cacheDuration: Int?, purpose: String? = nil) -> String {
-    var reason = base
-    if let purpose, !purpose.isEmpty {
-        reason += " for \(purpose)"
-    }
-    guard let duration = cacheDuration else { return reason }
-    return "\(reason) (cached for \(duration)s)"
+public func buildReason(base: String, cacheDuration: Int?) -> String {
+    guard let duration = cacheDuration else { return base }
+    return "\(base) (cached for \(duration)s)"
 }

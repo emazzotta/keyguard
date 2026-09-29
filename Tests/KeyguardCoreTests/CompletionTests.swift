@@ -51,8 +51,7 @@ struct CompletionTestRunner {
         }
 
         print("\nflags")
-        checkEqual("should offer both flags get accepts",
-                   Completion.flags(forCommand: "get"), ["--bridge-endpoint", "--cache-duration"])
+        checkEqual("should offer --cache-duration to get", Completion.flags(forCommand: "get"), ["--cache-duration"])
         checkEqual("should offer --cache-duration to list", Completion.flags(forCommand: "list"), ["--cache-duration"])
         checkEqual("should offer --force to migrate", Completion.flags(forCommand: "migrate"), ["--force"])
         checkEqual("should offer --force to both spellings of rename",
@@ -67,7 +66,7 @@ struct CompletionTestRunner {
         print("\nvalues(field:)")
         checkEqual("should answer commands", Completion.values(field: "commands", argument: nil), Completion.commands)
         checkEqual("should answer flags for the named command",
-                   Completion.values(field: "flags", argument: "get"), ["--bridge-endpoint", "--cache-duration"])
+                   Completion.values(field: "flags", argument: "get"), ["--cache-duration"])
         checkEqual("should stay silent on an unknown field rather than guess",
                    Completion.values(field: "nonsense", argument: "get"), [])
         checkEqual("should stay silent when flags is asked without a command",

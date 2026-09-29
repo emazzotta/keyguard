@@ -5,15 +5,11 @@ func commandGet(_ arguments: [String]) {
     let parsed = parseArgs(arguments)
     let keys = parsed.positional
     guard !keys.isEmpty else {
-        fail("Usage: keyguard get <KEY> [KEY...] [--cache-duration N] [--bridge-endpoint NAME]")
+        fail("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]")
     }
 
-    let purpose = parsed.bridgeEndpoint.flatMap {
-        bridgePurpose(endpoint: $0, configuredNames: configuredBridgeEndpointNames())
-    }
     let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))",
-                             cacheDuration: parsed.cacheDuration,
-                             purpose: purpose)
+                             cacheDuration: parsed.cacheDuration)
 
     let session = attempt { try Session.make() }
     let unlocked = attempt { try session.unlock(reason: reason) }

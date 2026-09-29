@@ -8,8 +8,7 @@ public enum Completion {
 
     public static func flags(forCommand command: String) -> [String] {
         switch command {
-        case "get": return ["--bridge-endpoint", "--cache-duration"]
-        case "list": return ["--cache-duration"]
+        case "get", "list": return ["--cache-duration"]
         case "import", "migrate", "mv", "rename": return ["--force"]
         case "add-recipient", "remove-recipient": return ["--tier"]
         default: return []
