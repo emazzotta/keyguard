@@ -105,6 +105,22 @@ with open(path, "w") as handle:
 PY
 }
 
+confirm_tests() {
+    local keyguard="$1"
+    local reason="Run bridge endpoint echo: /bin/echo 'hi there', with input \"a b\""
+    local prompts="$work/confirm-prompts.log"
+
+    assert_equals "should exit 0 when the prompt is approved" "0" \
+        "$(printf '%s\n' "$reason" | KEYGUARD_FAKE_PROMPTS="$prompts" "$keyguard" confirm >/dev/null 2>&1; echo $?)"
+    assert_equals "should show the reason word for word, with no store to unlock" \
+        "$reason" "$(cat "$prompts")"
+    assert_equals "should exit 2 when the prompt is denied" "2" \
+        "$(printf '%s' "$reason" | KEYGUARD_FAKE_PROMPTS="$prompts" KEYGUARD_FAKE_DENY=1 "$keyguard" confirm >/dev/null 2>&1; echo $?)"
+    assert_equals "should refuse an empty reason" "1" \
+        "$(printf ' \n' | KEYGUARD_FAKE_PROMPTS="$prompts" "$keyguard" confirm >/dev/null 2>&1; echo $?)"
+    assert_equals "should never prompt for an empty reason" "2" "$(wc -l < "$prompts" | tr -d ' ')"
+}
+
 service_meta_field() {
     curl -s -H "Tailscale-User-Login: tester" "$1/store/meta" \
         | python3 -c "import sys, json; d = json.load(sys.stdin); print($2)"
@@ -200,8 +216,12 @@ main() {
     KEYGUARD_AGE_BIN="$(command -v age)"
     export KEYGUARD_AGE_BIN
 
+    echo "confirm"
+    confirm_tests "$keyguard"
+
     seed_legacy_store "$work"
 
+    echo ""
     echo "migrate"
     local output
     output="$("$keyguard" migrate 2>&1)"

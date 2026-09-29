@@ -26,6 +26,13 @@ func randomSalt() -> Data {
 
 var isInteractive: Bool { isatty(STDIN_FILENO) != 0 }
 
+func readStandardInput() -> String? {
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    guard let text = String(data: data, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+    return text
+}
+
 func confirmOverwrite(_ name: String) -> Bool {
     fputs("  \(name) already exists. Overwrite? [y/N] ", stderr)
     guard let answer = readLine(strippingNewline: true) else { return false }
@@ -69,6 +76,8 @@ func printUsage() {
       import-key [IDENTITY]        Import an age identity into the Keychain
       export-key                   Print the age identity
       clear                        Delete the store and its identity
+      confirm                      Ask Touch ID to approve the reason read from stdin
+                                     Exits 0 when approved, 2 when denied
       help                         Show this help message
 
     Environment:
@@ -125,11 +134,7 @@ case "set":
         guard let input = readSecret(), !input.isEmpty else { fail("No value provided") }
         value = input
     } else {
-        let data = FileHandle.standardInput.readDataToEndOfFile()
-        guard let input = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !input.isEmpty else {
-            fail("No value provided via stdin")
-        }
+        guard let input = readStandardInput() else { fail("No value provided via stdin") }
         value = input
     }
     commandSet(name: args[2], value: value)
@@ -199,6 +204,11 @@ case "import-key":
 
 case "clear":
     commandClear()
+
+case "confirm":
+    guard !isInteractive else { fail("Usage: printf '%s' REASON | keyguard confirm") }
+    guard let reason = readStandardInput() else { fail("No reason provided via stdin") }
+    authenticate(reason: reason)
 
 default:
     fputs("Unknown command '\(args[1])'\n\n", stderr)

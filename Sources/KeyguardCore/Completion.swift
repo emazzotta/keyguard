@@ -2,7 +2,7 @@ import Foundation
 
 public enum Completion {
     public static let commands = [
-        "add-recipient", "clear", "delete", "export", "export-key", "get", "help", "import",
+        "add-recipient", "clear", "confirm", "delete", "export", "export-key", "get", "help", "import",
         "import-key", "init", "list", "migrate", "mv", "pull", "push", "remove-recipient", "rename", "rm", "set", "verify"
     ]
 
