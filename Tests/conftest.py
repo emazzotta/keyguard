@@ -13,10 +13,11 @@ import pytest
 # Make src/keyguard_server importable
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from keyguard_server import bridge, cache  # noqa: E402
+from keyguard_server import bridge, cache, consent  # noqa: E402
 from keyguard_server.handler import KeyguardHandler  # noqa: E402
+from keyguard_server.keyguard_cli import CliResult  # noqa: E402
 
-BRIDGE_TOKEN = "test-bridge-token"
+ABSENT_BRIDGE_CONFIG = Path("/nonexistent/keyguard-tests/bridge.yaml")
 
 
 # ---------------------------------------------------------------------------
@@ -46,18 +47,28 @@ def reset_state():
 # ---------------------------------------------------------------------------
 
 
-def set_bridge_state(monkeypatch, *, endpoints: dict | None = None,
-                     token: str = "", token_resolved: bool = False) -> None:
+def set_bridge_state(monkeypatch, *, endpoints: dict | None = None) -> None:
+    monkeypatch.setattr(bridge, "BRIDGE_CONFIG_PATH", ABSENT_BRIDGE_CONFIG)
     monkeypatch.setattr(bridge, "_endpoints", endpoints or {})
-    monkeypatch.setattr(bridge, "_token", token)
-    monkeypatch.setattr(bridge, "_token_resolved", token_resolved)
-    monkeypatch.setattr(bridge, "_token_last_attempt", 0.0)
     monkeypatch.setattr(bridge, "_config_dirty", False)
 
 
 @pytest.fixture()
-def configured_bridge(monkeypatch):
-    """Bridge configured with a pre-resolved token (skips keyguard subprocess)."""
+def approved_prompts(monkeypatch) -> list[str]:
+    """Approve every Touch ID prompt without the CLI, recording each reason shown."""
+    reasons: list[str] = []
+
+    def approve(reason: str) -> CliResult:
+        reasons.append(reason)
+        return CliResult(rc=0, stdout="", stderr="")
+
+    monkeypatch.setattr(consent, "ask", approve)
+    return reasons
+
+
+@pytest.fixture()
+def configured_bridge(monkeypatch, approved_prompts):
+    """Private endpoints whose prompts are approved without the CLI."""
     endpoints = {
         "echo": bridge.Endpoint(
             command=("/bin/echo", "hello"),
@@ -78,17 +89,23 @@ def configured_bridge(monkeypatch):
             timeout=10,
         ),
     }
-    set_bridge_state(monkeypatch, endpoints=endpoints, token=BRIDGE_TOKEN, token_resolved=True)
+    set_bridge_state(monkeypatch, endpoints=endpoints)
 
 
 @pytest.fixture()
-def lazy_token_bridge(monkeypatch):
-    """Bridge with endpoints but token not yet resolved (will hit keyguard CLI on first call)."""
+def prompting_bridge(monkeypatch):
+    """Endpoints whose prompts go through the real consent gate to the (patched) CLI."""
     endpoints = {
         "echo": bridge.Endpoint(
             command=("/bin/echo", "hello"),
             allowed_methods=frozenset(["POST"]),
             pass_stdin=False,
+            timeout=10,
+        ),
+        "cat": bridge.Endpoint(
+            command=("/bin/cat",),
+            allowed_methods=frozenset(["POST"]),
+            pass_stdin=True,
             timeout=10,
         ),
         "public-echo": bridge.Endpoint(
@@ -99,12 +116,12 @@ def lazy_token_bridge(monkeypatch):
             public=True,
         ),
     }
-    set_bridge_state(monkeypatch, endpoints=endpoints, token="", token_resolved=False)
+    set_bridge_state(monkeypatch, endpoints=endpoints)
 
 
 @pytest.fixture()
-def mixed_bridge(monkeypatch):
-    """Bridge with a mix of protected and public endpoints, token pre-resolved."""
+def mixed_bridge(monkeypatch, approved_prompts):
+    """Private and public endpoints side by side, prompts approved without the CLI."""
     endpoints = {
         "private-echo": bridge.Endpoint(
             command=("/bin/echo", "private"),
@@ -134,7 +151,7 @@ def mixed_bridge(monkeypatch):
             public=True,
         ),
     }
-    set_bridge_state(monkeypatch, endpoints=endpoints, token=BRIDGE_TOKEN, token_resolved=True)
+    set_bridge_state(monkeypatch, endpoints=endpoints)
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +192,11 @@ def http_delete(srv: HTTPServer, path: str) -> tuple[int, str]:
     return resp.status, resp.read().decode()
 
 
-def http_bridge_get(srv: HTTPServer, name: str, token: str | None = BRIDGE_TOKEN) -> tuple[int, str]:
+def http_bridge_get(srv: HTTPServer, name: str,
+                    extra_headers: dict[str, str] | None = None) -> tuple[int, str]:
     headers = {"Connection": "close"}
-    if token is not None:
-        headers["Authorization"] = f"Bearer {token}"
+    if extra_headers:
+        headers.update(extra_headers)
     conn = _connection(srv)
     conn.request("GET", f"/_bridge/{name}", headers=headers)
     resp = conn.getresponse()
@@ -186,11 +204,8 @@ def http_bridge_get(srv: HTTPServer, name: str, token: str | None = BRIDGE_TOKEN
 
 
 def http_bridge_post(srv: HTTPServer, name: str, body: str = "",
-                     token: str | None = BRIDGE_TOKEN,
                      extra_headers: dict[str, str] | None = None) -> tuple[int, str]:
     headers = {"Connection": "close"}
-    if token is not None:
-        headers["Authorization"] = f"Bearer {token}"
     encoded = body.encode()
     if encoded:
         headers["Content-Length"] = str(len(encoded))

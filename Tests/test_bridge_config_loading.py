@@ -15,9 +15,6 @@ def yaml_config(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(bridge, "BRIDGE_CONFIG_PATH", config_file)
     # Reset bridge state so each test starts clean
     monkeypatch.setattr(bridge, "_endpoints", {})
-    monkeypatch.setattr(bridge, "_token", "")
-    monkeypatch.setattr(bridge, "_token_resolved", False)
-    monkeypatch.setattr(bridge, "_token_last_attempt", 0.0)
     monkeypatch.setattr(bridge, "_config_dirty", True)
     monkeypatch.setattr(bridge, "_config_mtime", 0.0)
 
@@ -77,7 +74,7 @@ def test_stdin_default_is_false(yaml_config):
     assert bridge.get_endpoint("hello").pass_stdin is False
 
 
-# ---- public flag (auth bypass for explicitly opted-in endpoints) ----
+# ---- public flag (no prompt for explicitly opted-in endpoints) ----
 
 
 def test_public_default_is_false(yaml_config):
@@ -89,7 +86,7 @@ def test_public_default_is_false(yaml_config):
     assert bridge.get_endpoint("hello").public is False
 
 
-def test_public_true_disables_auth(yaml_config):
+def test_public_true_skips_the_prompt(yaml_config):
     yaml_config("""
         endpoints:
           open:
@@ -349,19 +346,3 @@ def test_should_not_reload_when_file_mtime_unchanged(yaml_config):
 
     assert bridge.get_endpoint("stable") is not None
 
-
-def test_mark_dirty_clears_resolved_token(yaml_config, monkeypatch):
-    """After SIGHUP, the cached token must be discarded so next request re-resolves."""
-    yaml_config("""
-        endpoints:
-          echo:
-            command: [/bin/echo]
-    """)
-    monkeypatch.setattr(bridge, "_token", "old-token")
-    monkeypatch.setattr(bridge, "_token_resolved", True)
-
-    bridge.mark_dirty()
-    bridge.ensure_config()
-
-    assert bridge._token == ""
-    assert bridge._token_resolved is False

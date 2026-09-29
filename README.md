@@ -189,33 +189,55 @@ make install
 make restart
 ```
 
-### Generating and storing the token
+### One Touch ID prompt per call
 
-The bridge token always lives inside keyguard itself — no plaintext-on-disk option. Generate a random value and store it under the fixed name `MAC_BRIDGE_TOKEN`:
+Every call to a private endpoint asks Touch ID right before the command runs, and the
+prompt names what will run: the endpoint, its command, and the input the command reads.
 
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(32))" \
-  | xargs -0 keyguard set MAC_BRIDGE_TOKEN
+```
+Run bridge endpoint mac-trash: ~/Projects/private/dotfiles/bin/mac-trash, with input "/Users/me/Desktop/a.png"
+Run bridge endpoint spotify-play: osascript -e 'tell application "Spotify" to play'
+List all bridge endpoints, private ones included
 ```
 
-That's the entire token setup. The YAML config only contains endpoint definitions.
+```plantuml
+@startuml
+!pragma layout smetana
+participant "container" as caller
+participant "keyguard-server" as server
+participant "keyguard confirm" as cli
+caller -> server : POST /_bridge/mac-trash\nbody "/Users/me/Desktop/a.png"
+server -> server : refuse a browser (403),\nan unknown name (404), a wrong method (405)
+server -> cli : stdin "Run bridge endpoint mac-trash: ..., with input ..."
+cli -> cli : Touch ID dialog shows that reason
+cli --> server : exit 0 approved, 2 denied
+server -> server : run the endpoint it just described
+server --> caller : 200 with stdout, or 403 when denied
+@enduml
+```
 
-The server reads `MAC_BRIDGE_TOKEN` from keyguard on the **first authenticated bridge request** (lazy load) — one Touch ID prompt per server lifetime, then cached in process memory. Send `SIGHUP` to force a re-resolve.
-
-That prompt names the endpoint that triggered it — `"Reveal MAC_BRIDGE_TOKEN for bridge endpoint resolve-mcp-start"` — so you approve a specific command rather than an anonymous token read.
-
-The name is **verified, not asserted**. The server passes only a bare key via `keyguard get MAC_BRIDGE_TOKEN --bridge-endpoint <name>`, and the CLI itself looks that name up in `~/.mac-bridge-endpoints.yaml` before it will show it. A name that is not a configured endpoint, or that is anything other than an identifier (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`), is silently dropped and you get the bare `"Reveal MAC_BRIDGE_TOKEN"` instead. So the flag cannot be used to dress a token read up as something reassuring — nothing calling the CLI can put its own words in the dialog, and the prompt never claims an endpoint it has not confirmed. Reads triggered by `_bridge/list` dispatch no endpoint and therefore name none.
-
-Two layers protect the Touch ID prompt from abuse:
-
-1. Requests without a well-formed `Authorization: Bearer …` header are rejected **before** keyguard is invoked. Unauthenticated callers cannot trigger a prompt at all.
-2. Failed resolutions (Touch ID denied, key missing) are rate-limited to one attempt per 60 seconds. A misconfigured client cannot spam prompts.
+- The server writes every reason from the endpoint it is about to run, so a caller picks
+  the input but never the wording. The command is shown as configured, with your home
+  directory as `~`. Input appears only for `stdin: true` endpoints: each line quoted, with
+  control, invisible and bidi-override characters escaped, at most 4 lines of up to 100
+  characters, a longer line cut in the middle so its file name stays visible.
+- `keyguard confirm` shows the dialog: it reads the reason on stdin and exits 0 when
+  approved, 2 when denied. It releases no secret, so calling it with other wording gains
+  nothing.
+- A denied or timed-out prompt, or a `keyguard` too old to know `confirm`, means the
+  command never runs.
+- One bridge prompt at a time: a call arriving while one is open gets `429` and retries
+  once it is answered, which `envify --bridge` does by itself.
+- A request carrying an `Origin` or `Sec-Fetch-Site` header gets `403` before anything
+  else. A web page always sends one and curl or urllib never do, so a page cannot raise a
+  prompt through `127.0.0.1`.
+- There is no bearer token. An `Authorization` header from an older client is ignored.
 
 ### Reloading config
 
 Saving the YAML file is enough - the server checks the file's mtime on every bridge request and reloads automatically.
 
-To force a reload that also clears the cached token and rate-limit state, send `SIGHUP`:
+To force a reload, send `SIGHUP`:
 
 ```bash
 kill -HUP $(launchctl list | awk '/com.keyguard.server/{print $1}')
@@ -246,7 +268,7 @@ endpoints:
   ping:
     command: [/usr/bin/true]
     method: GET
-    public: true          # callable without Authorization - see warning below
+    public: true          # runs without a Touch ID prompt - see warning below
 ```
 
 **Command rules:**
@@ -254,29 +276,27 @@ endpoints:
 - The executable path must be absolute, or resolvable via the server's `$PATH`.
 - No user-controlled values are ever passed into command arguments — the only caller input that reaches the command is the POST body via `stdin: true`.
 
-**The `public` flag (auth bypass — exception, never the default):**
+**The `public` flag (no prompt - the exception, never the default):**
 
-By default every endpoint requires `Authorization: Bearer <MAC_BRIDGE_TOKEN>`. Adding `public: true` to a single endpoint disables that check **for that endpoint only** — no token, no Touch ID, just the IP allowlist as the gate. Use it sparingly:
+By default every call asks Touch ID. Adding `public: true` to a single endpoint skips that prompt **for that endpoint only**, leaving the IP allowlist and the browser check as the gates. Use it sparingly:
 
 - Suitable for: side-effect-light, non-secret-returning commands you'd be comfortable with anything on the local Docker network triggering — a status ping, a non-confidential notification, a "play/pause" toggle.
 - Unsuitable for: anything that mutates persistent state, reveals secrets, runs external network calls, or that you'd be unhappy seeing called by a compromised container on the same machine.
-- Strict parsing: only the literal YAML boolean `true` opens the gate. `public: "true"` (quoted), `public: 1`, `public: yes-but-no` all stay protected, with a warning logged. Default and missing values are protected.
-- Method whitelist, stdin handling, timeout, and access logging all still apply to public endpoints - `public: true` only relaxes authentication, nothing else.
+- Strict parsing: only the literal YAML boolean `true` opens the gate. `public: "true"` (quoted), `public: 1`, `public: yes-but-no` all stay private, with a warning logged. Default and missing values are private.
+- Method whitelist, stdin handling, timeout, and access logging all still apply to public endpoints - `public: true` only removes the prompt.
 
-The `_bridge/list` endpoint is privilege-aware:
+The `_bridge/list` endpoint shows private endpoints only once you approve it:
 
-- **Without a bearer header (or with a wrong one)**: returns only endpoints marked `public: true`. Protected endpoint names never leak to anonymous callers. No Touch ID is triggered when the bearer header is absent.
-- **With a valid bearer**: returns every endpoint, with the `public` field distinguishing them. The first authenticated call resolves the bridge token from keyguard (one Touch ID prompt per server lifetime, then cached).
-- **With a bearer but token resolution fails** (Touch ID denied, rate-limited, key missing): the listing falls back to the public-only view rather than returning 503 - so listing remains useful for discovery even when the server cannot verify the caller's identity.
+- `_bridge/list` returns the endpoints marked `public: true`, without a prompt, so private endpoint names never leak to a listing you did not approve.
+- `_bridge/list?all=1` asks Touch ID (`List all bridge endpoints, private ones included`), then returns every endpoint with the `public` field telling them apart. Denied, it answers `403`.
 
 ```bash
-# Anonymous discovery - public endpoints only
+# Public endpoints only, no prompt
 curl -s http://host.docker.internal:7777/_bridge/list | jq
 # [{"name":"ping","methods":["GET"],"timeout":60,"public":true}]
 
-# Authenticated discovery - full list, mixed public + protected
-curl -s -H "Authorization: Bearer $TOKEN" \
-  http://host.docker.internal:7777/_bridge/list | jq
+# Every endpoint, after one Touch ID prompt
+curl -s 'http://host.docker.internal:7777/_bridge/list?all=1' | jq
 # [{"name":"ping","methods":["GET"],"timeout":60,"public":true},
 #  {"name":"spotify-play","methods":["POST"],"timeout":60,"public":false}, ...]
 ```
@@ -284,29 +304,17 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 ### Usage from Docker
 
 ```bash
-TOKEN="your-random-token-here"
-
-# Trigger a command (POST)
-curl -s -X POST http://host.docker.internal:7777/_bridge/spotify-play \
-  -H "Authorization: Bearer $TOKEN"
+# Trigger a command (POST): one prompt naming spotify-play and its osascript line
+curl -s -X POST http://host.docker.internal:7777/_bridge/spotify-play
 
 # Read output (GET)
-curl -s http://host.docker.internal:7777/_bridge/uptime \
-  -H "Authorization: Bearer $TOKEN"
+curl -s http://host.docker.internal:7777/_bridge/uptime
 
-# Pass data as stdin (POST + stdin)
-curl -s -X POST http://host.docker.internal:7777/_bridge/say \
-  -H "Authorization: Bearer $TOKEN" \
-  -d "hello from your container"
+# Pass data as stdin (POST + stdin): the prompt quotes the text
+curl -s -X POST http://host.docker.internal:7777/_bridge/say -d "hello from your container"
 
-# Public endpoint - no Authorization header needed
+# Public endpoint: no prompt
 curl -s http://host.docker.internal:7777/_bridge/ping
-
-# Anonymous discovery - lists only public endpoints
-curl -s http://host.docker.internal:7777/_bridge/list
-
-# Authenticated discovery - lists every endpoint, public + protected
-curl -s -H "Authorization: Bearer $TOKEN" http://host.docker.internal:7777/_bridge/list
 ```
 
 Every successful bridge call appends a line to `~/.keyguard/access.log` with the endpoint name and caller IP. Failed calls are not logged.
@@ -315,18 +323,18 @@ Every successful bridge call appends a line to `~/.keyguard/access.log` with the
 
 | Concern | How it is handled |
 |---|---|
-| Unauthenticated call to a protected endpoint | `Authorization: Bearer <token>` required; 401 otherwise |
-| Public endpoints (`public: true`) | Auth check is skipped by design — the IP allowlist is the only gate. Use only for side-effect-light, non-secret-returning commands you would be comfortable seeing called by anything on the local Docker network |
-| Accidental opt-in to public | Strict parser: only the literal YAML boolean `true` opens the gate. `public: "true"`, `public: 1`, `public: maybe` all stay protected, with a warning logged |
-| Token interception on the network | Only localhost and Docker internal subnets are accepted (same as keyguard secrets) |
-| Token at rest | The token lives inside the age-encrypted keyguard store under `MAC_BRIDGE_TOKEN` — never on disk in plaintext |
-| Touch ID prompt spam from unauthenticated callers | Requests without a `Bearer …` header are rejected *before* keyguard is invoked — no prompt fires for malformed/missing auth |
-| Touch ID prompt spam from misconfigured callers | Failed token resolutions are rate-limited to 1 per 60 seconds; SIGHUP clears the limit |
-| Touch ID prompt from public endpoint calls | Public endpoints never invoke keyguard — a million unauthenticated calls to a public endpoint cannot fire a single prompt |
+| A private endpoint runs without you knowing | Every call asks Touch ID first, naming the endpoint, its command and its input; denied, it never runs |
+| A prompt that misdescribes the call | The server writes each reason from the endpoint it then runs; a caller controls only the input, shown quoted with invisible and bidi-override characters escaped |
+| A web page calling the bridge through `127.0.0.1` | Requests with an `Origin` or `Sec-Fetch-Site` header get 403 before anything prompts or runs |
+| Prompts piling up | One bridge prompt at a time; a call arriving meanwhile gets 429 instead of queueing a dialog its caller may have given up on |
+| A caller that keeps retrying after a denial | Each attempt is a new prompt, naming the same thing; deny it again, or stop the caller. There is no cooldown, as with secret reads |
+| Public endpoints (`public: true`) | No prompt by design - the IP allowlist and the browser check are the only gates. Use only for side-effect-light, non-secret-returning commands you would be comfortable seeing called by anything on the local Docker network |
+| Accidental opt-in to public | Strict parser: only the literal YAML boolean `true` opens the gate. `public: "true"`, `public: 1`, `public: maybe` all stay private, with a warning logged |
+| Calls from another device | Only localhost and Docker internal subnets are accepted (same as keyguard secrets) |
+| Touch ID prompt from public endpoint calls | Public endpoints never invoke keyguard - a million calls to a public endpoint cannot fire a single prompt |
 | Command injection via request body | Body can only reach `stdin` — never command args. Commands are fixed lists, no shell involved |
 | Arbitrary command execution | Only commands declared in the gitignored config file run; no dynamic dispatch |
-| Endpoint enumeration | `_bridge/list` is privilege-aware: anonymous callers see only `public: true` endpoints, authenticated callers see the full list. Protected endpoint names do not leak to unauthenticated traffic. The list never reveals the underlying command |
-| Token brute force | `hmac.compare_digest` (constant-time) prevents timing attacks; IP allowlist limits the attack surface to Docker networks |
+| Endpoint enumeration | Without `?all=1` the list holds only `public: true` endpoints; the full list costs a prompt. It never reveals the underlying command |
 | Config file leaks to git | `.mac-bridge-endpoints.yaml` is in `.gitignore` |
 
 The config file itself is the trust boundary: only what you write into it can be called.

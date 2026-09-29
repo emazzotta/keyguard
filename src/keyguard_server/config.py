@@ -23,6 +23,4 @@ BRIDGE_CONFIG_PATH: Final = Path(
     os.environ.get("KEYGUARD_BRIDGE_CONFIG_FILE")
     or "~/.mac-bridge-endpoints.yaml"
 ).expanduser()
-BRIDGE_TOKEN_KEYGUARD_KEY: Final = "MAC_BRIDGE_TOKEN"
-BRIDGE_TOKEN_RETRY_COOLDOWN: Final = 60.0
 MAX_BRIDGE_OUTPUT_BYTES: Final = 1_048_576

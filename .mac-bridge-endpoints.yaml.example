@@ -8,28 +8,20 @@
 #      export KEYGUARD_BRIDGE_CONFIG_FILE=~/Dropbox/keyguard/bridge.yaml
 #      make install && make restart
 #
-# 2. Store a random token in keyguard:
-#      python3 -c "import secrets; print(secrets.token_urlsafe(32))" \
-#        | xargs -0 keyguard set MAC_BRIDGE_TOKEN
-#    The token is read from keyguard on the FIRST authenticated bridge call
-#    (one Touch ID prompt per server lifetime), then cached in memory.
-#
-# 3. Save the file - the server hot-reloads on mtime change at the next request.
-#    SIGHUP is still accepted if you want to force a reload + clear the cached
-#    token and rate-limit state:
+# 2. Save the file - the server hot-reloads on mtime change at the next request.
+#    SIGHUP is still accepted if you want to force a reload:
 #      kill -HUP $(launchctl list | awk '/com.keyguard.server/{print $1}')
 #
-# Usage from a Docker container:
-#   curl -s -X POST http://host.docker.internal:7777/_bridge/spotify-play \
-#     -H "Authorization: Bearer <your-token>"
+# Usage from a Docker container (one Touch ID prompt naming the command):
+#   curl -s -X POST http://host.docker.internal:7777/_bridge/spotify-play
 #
 # Endpoint options:
 #   command   (required) list of executable + args - no shell, no interpolation
 #   method    GET | POST | [GET, POST]  (default: POST)
 #   stdin     true | false  - pipe POST body to the command's stdin (default: false)
 #   timeout   seconds before the command is killed (default: 60)
-#   public    true | false  - if true, no Authorization header is required for
-#             this endpoint. The IP allowlist remains the only gate. Default is
+#   public    true | false  - if true, calls run without a Touch ID prompt.
+#             The IP allowlist and the browser check remain the only gates. Default is
 #             false; only the literal YAML boolean `true` opens the gate (a
 #             quoted "true" or a number stays protected). Use sparingly for
 #             side-effect-light, non-secret-returning commands.
@@ -62,7 +54,7 @@ endpoints:
   #   method: POST
   #   stdin: true
 
-  # Example: public endpoints - callable without an Authorization header.
+  # Example: public endpoints - callable without a Touch ID prompt.
   # Only do this for commands you would be comfortable being triggered by
   # anything that can reach the server (i.e. anything inside the IP allowlist).
   # Audible chimes are a good fit: side-effect-light, no secrets returned,

@@ -7,7 +7,7 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
-from . import access_log, bridge, cache, encoding, keyguard_cli
+from . import access_log, bridge, cache, consent, encoding, keyguard_cli
 from .config import (
     MAX_BRIDGE_OUTPUT_BYTES,
     MAX_CACHE_TIMEOUT,
@@ -19,6 +19,8 @@ from .keyguard_cli import CliResult
 
 _BRIDGE_PREFIX = "_bridge/"
 _BRIDGE_LIST = "list"
+_LIST_ALL_PARAM = "all"
+_BROWSER_HEADERS = ("Origin", "Sec-Fetch-Site")
 _KEYS_PATH = "_keys"
 _CACHE_PATH = "_cache"
 
@@ -32,16 +34,16 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
         parsed = urlparse(self.path)
         path = parsed.path.strip("/")
+        query = parse_qs(parsed.query)
 
         if path.startswith(_BRIDGE_PREFIX):
-            self._handle_bridge("GET", path[len(_BRIDGE_PREFIX):])
+            self._handle_bridge("GET", path[len(_BRIDGE_PREFIX):], query)
             return
 
         if not path:
             self._respond(400, b"Missing secret name")
             return
 
-        query = parse_qs(parsed.query)
         if path == _KEYS_PATH:
             self._handle_list(query)
             return
@@ -52,13 +54,14 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if not self._gate_ip():
             return
 
-        path = urlparse(self.path).path.strip("/")
+        parsed = urlparse(self.path)
+        path = parsed.path.strip("/")
 
         if path.startswith(_BRIDGE_PREFIX):
             body = self._read_body(required=False)
             if body is None:
                 return
-            self._handle_bridge("POST", path[len(_BRIDGE_PREFIX):], body=body)
+            self._handle_bridge("POST", path[len(_BRIDGE_PREFIX):], parse_qs(parsed.query), body=body)
             return
 
         if not path or "," in path or path == _KEYS_PATH:
@@ -150,17 +153,19 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
     # ---- Bridge handler ----
 
-    def _handle_bridge(self, method: str, name: str, body: str = "") -> None:
-        bridge.ensure_config()
+    def _handle_bridge(self, method: str, name: str, query: dict[str, list[str]],
+                       body: str = "") -> None:
+        if self._is_browser_request():
+            self._respond(403, b"Bridge refuses requests sent by a browser")
+            return
 
+        bridge.ensure_config()
         if not bridge.is_configured():
             self._respond(501, b"Bridge not configured")
             return
 
         if name == _BRIDGE_LIST:
-            show_all = self._caller_can_see_all_endpoints()
-            payload = json.dumps(bridge.list_endpoints(public_only=not show_all)).encode()
-            self._respond(200, payload, content_type="application/json")
+            self._handle_bridge_list(query)
             return
 
         endpoint = bridge.get_endpoint(name)
@@ -168,55 +173,33 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(404, b"Unknown bridge endpoint")
             return
 
-        if not endpoint.public and not self._authorize_bridge(name):
-            return
-
         if method not in endpoint.allowed_methods:
             self._respond(405, b"Method not allowed")
             return
 
+        if not endpoint.public and not self._confirm(consent.run_reason(name, endpoint, body)):
+            return
+
         self._execute_bridge(name, endpoint, body)
 
-    def _caller_can_see_all_endpoints(self) -> bool:
-        """Listing is privilege-aware: a valid bearer token reveals every
-        endpoint, anonymous (or wrong-token) callers see only the public ones.
+    def _handle_bridge_list(self, query: dict[str, list[str]]) -> None:
+        include_private = query.get(_LIST_ALL_PARAM) == ["1"]
+        if include_private and not self._confirm(consent.LIST_ALL_REASON):
+            return
+        payload = json.dumps(bridge.list_endpoints(public_only=not include_private)).encode()
+        self._respond(200, payload, content_type="application/json")
 
-        Callers without a Bearer header never trigger keyguard - the listing
-        falls back to public-only without burning a Touch ID prompt. A bearer
-        header is treated as a signal that the caller wants the full list and
-        is willing to pay the token-resolution cost; if resolution fails
-        (rate-limit, Touch ID denied, key missing) the caller still gets a
-        useful public-only listing rather than a 503.
-        """
-        auth = self.headers.get("Authorization")
-        if not auth or not auth.startswith("Bearer "):
+    def _is_browser_request(self) -> bool:
+        """A web page always sends one of these headers; curl and urllib never do."""
+        return any(self.headers.get(header) for header in _BROWSER_HEADERS)
+
+    def _confirm(self, reason: str) -> bool:
+        """Returns True iff Touch ID approved the reason; otherwise the refusal has been sent."""
+        result = consent.ask(reason)
+        if result is None:
+            self._respond(429, b"Another bridge Touch ID prompt is open; retry once it is answered")
             return False
-        if bridge.ensure_token() is not None:
-            return False
-        return bridge.verify_token(auth)
-
-    def _authorize_bridge(self, name: str) -> bool:
-        """Run the bearer-token gate for protected endpoints. Returns True iff the
-        caller is authenticated; otherwise emits the response and returns False.
-
-        Reject malformed/missing Authorization headers BEFORE keyguard is touched
-        so unauthenticated callers cannot spam Touch ID prompts.
-        """
-        auth = self.headers.get("Authorization")
-        if not auth or not auth.startswith("Bearer "):
-            self._respond(401, b"Unauthorized")
-            return False
-
-        token_error = bridge.ensure_token(name)
-        if token_error is not None:
-            self._respond(503, token_error.encode())
-            return False
-
-        if not bridge.verify_token(auth):
-            self._respond(401, b"Unauthorized")
-            return False
-
-        return True
+        return self._respond_cli_or_handle_error(result, suppress_success=True)
 
     def _execute_bridge(self, name: str, endpoint: bridge.Endpoint, body: str) -> None:
         stdin_data = body if endpoint.pass_stdin else None

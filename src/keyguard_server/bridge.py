@@ -1,27 +1,15 @@
-"""Bridge: whitelisted Mac commands callable over HTTP, gated by a keyguard-stored token.
+"""Bridge: whitelisted Mac commands callable over HTTP.
 
-Token flow:
-- The token always lives in keyguard under MAC_BRIDGE_TOKEN (no plaintext fallback).
-- Resolved lazily on the first authenticated bridge request - one Touch ID per server lifetime.
-- Failed resolutions (Touch ID denied, key missing) are rate-limited so a misconfigured
-  client cannot spam Touch ID prompts. SIGHUP forces a reload and clears the rate limit.
-- Requests without a Bearer header are rejected before keyguard is ever invoked.
+Owns the endpoint config: loaded on startup, after SIGHUP, or when the file changes.
+The Touch ID prompt a private endpoint needs before it runs lives in consent.py.
 """
 from __future__ import annotations
 
-import hmac
 import sys
 import threading
-import time
 from dataclasses import dataclass
 
-from . import keyguard_cli
-from .config import (
-    BRIDGE_CONFIG_PATH,
-    BRIDGE_TOKEN_KEYGUARD_KEY,
-    BRIDGE_TOKEN_RETRY_COOLDOWN,
-    SUBPROCESS_TIMEOUT,
-)
+from .config import BRIDGE_CONFIG_PATH, SUBPROCESS_TIMEOUT
 
 
 @dataclass(frozen=True)
@@ -34,14 +22,10 @@ class Endpoint:
 
 
 _endpoints: dict[str, Endpoint] = {}
-_token: str = ""
-_token_resolved: bool = False
-_token_last_attempt: float = 0.0
 _config_dirty: bool = True
 _config_mtime: float = 0.0
 
 _config_lock = threading.Lock()
-_token_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -63,11 +47,11 @@ def list_endpoints(public_only: bool = False) -> list[dict]:
 
     Command is intentionally omitted - callers need to know what they can call,
     not the underlying implementation. The `public` flag tells callers which
-    endpoints can be invoked without an Authorization header.
+    endpoints run without a Touch ID prompt.
 
     When `public_only=True`, only endpoints with `public: true` are returned -
-    used by the handler to give anonymous callers a discovery view that does
-    not leak the existence of protected endpoints.
+    the view for any listing the user has not approved, so it does not leak
+    the existence of private endpoints.
     """
     return [
         {
@@ -100,31 +84,8 @@ def _config_stale() -> bool:
         return False
 
 
-def ensure_token(bridge_endpoint: str | None = None) -> str | None:
-    """Resolve the bridge token from keyguard if not already cached.
-    Returns None on success (token stored in module state), error message on failure.
-
-    `bridge_endpoint` is the endpoint whose dispatch needs the token; the CLI
-    shows it in the Touch ID prompt after confirming it against the config, so
-    approving is an informed decision rather than a bare "Reveal MAC_BRIDGE_TOKEN".
-    """
-    if _token_resolved:
-        return None
-    with _token_lock:
-        return _resolve_token_locked(bridge_endpoint)
-
-
-def verify_token(auth_header: str | None) -> bool:
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return False
-    provided = auth_header[len("Bearer "):].strip()
-    if not _token:
-        return False
-    return hmac.compare_digest(provided.encode(), _token.encode())
-
-
 def mark_dirty() -> None:
-    """Schedule a config + token reload (called from the SIGHUP handler)."""
+    """Schedule a config reload (called from the SIGHUP handler)."""
     global _config_dirty
     _config_dirty = True
     print("[keyguard] bridge: config reload scheduled (SIGHUP received)", file=sys.stderr)
@@ -135,17 +96,9 @@ def mark_dirty() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _reset_state_locked() -> None:
-    global _endpoints, _token, _token_resolved, _token_last_attempt
-    _endpoints = {}
-    _token = ""
-    _token_resolved = False
-    _token_last_attempt = 0.0
-
-
 def _load_config_locked() -> None:
-    global _config_mtime
-    _reset_state_locked()
+    global _endpoints, _config_mtime
+    _endpoints = {}
 
     if not BRIDGE_CONFIG_PATH.exists():
         return
@@ -171,16 +124,12 @@ def _load_config_locked() -> None:
     if not isinstance(endpoints_raw, dict):
         print("[keyguard] bridge: 'endpoints' must be a YAML mapping, ignoring", file=sys.stderr)
         endpoints_raw = {}
-    endpoints = _parse_endpoints(endpoints_raw)
-    global _endpoints
-    _endpoints = endpoints
+    _endpoints = _parse_endpoints(endpoints_raw)
     try:
         _config_mtime = BRIDGE_CONFIG_PATH.stat().st_mtime
     except OSError:
         pass
-    print(f"[keyguard] bridge: loaded {len(endpoints)} endpoint(s); "
-          f"token will be resolved from keyguard:{BRIDGE_TOKEN_KEYGUARD_KEY} on first use",
-          file=sys.stderr)
+    print(f"[keyguard] bridge: loaded {len(_endpoints)} endpoint(s)", file=sys.stderr)
 
 
 def _parse_endpoints(raw: dict) -> dict[str, Endpoint]:
@@ -227,7 +176,7 @@ def _parse_public(name: str, value: object) -> bool:
     """Strict parse of the `public` flag. Only the literal YAML boolean `true`
     opens an endpoint; any other value (string, number, missing) keeps it
     protected. Security-relevant: a typo like `public: "true"` must not silently
-    drop authentication.
+    drop the Touch ID prompt.
     """
     if value is False or value is None:
         return False
@@ -235,7 +184,7 @@ def _parse_public(name: str, value: object) -> bool:
         return True
     print(
         f"[keyguard] bridge: endpoint '{name}' has non-boolean 'public' value "
-        f"({value!r}); treating as protected. Use 'public: true' to disable auth.",
+        f"({value!r}); treating as protected. Use 'public: true' to skip the Touch ID prompt.",
         file=sys.stderr,
     )
     return False
@@ -256,48 +205,3 @@ def _parse_methods(spec: object) -> frozenset[str]:
     if isinstance(spec, list):
         return frozenset(str(m).upper() for m in spec)
     return frozenset(["POST"])
-
-
-# ---------------------------------------------------------------------------
-# Internal - token resolution
-# ---------------------------------------------------------------------------
-
-
-def _resolve_token_locked(bridge_endpoint: str | None = None) -> str | None:
-    global _token, _token_resolved, _token_last_attempt
-
-    if _token_resolved:
-        return None
-
-    cooldown_error = _check_rate_limit()
-    if cooldown_error:
-        return cooldown_error
-    _token_last_attempt = time.monotonic()
-
-    result = keyguard_cli.get(BRIDGE_TOKEN_KEYGUARD_KEY, bridge_endpoint=bridge_endpoint)
-    if result.timed_out:
-        return "keyguard timed out while resolving bridge token"
-    if result.not_found:
-        return "keyguard binary not found"
-    if result.touch_id_cancelled:
-        return "Touch ID cancelled while resolving bridge token"
-    if not result.ok:
-        return f"keyguard error resolving bridge token: {result.stderr.strip()}"
-
-    token = result.stdout.strip()
-    if not token:
-        return f"keyguard:{BRIDGE_TOKEN_KEYGUARD_KEY} resolved to an empty value"
-
-    _token = token
-    _token_resolved = True
-    return None
-
-
-def _check_rate_limit() -> str | None:
-    if not _token_last_attempt:
-        return None
-    elapsed = time.monotonic() - _token_last_attempt
-    if elapsed >= BRIDGE_TOKEN_RETRY_COOLDOWN:
-        return None
-    remaining = int(BRIDGE_TOKEN_RETRY_COOLDOWN - elapsed) + 1
-    return f"Bridge token resolution rate-limited; retry in {remaining}s or send SIGHUP to reload"
