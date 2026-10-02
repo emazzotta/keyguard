@@ -76,7 +76,10 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(400, b"Missing value in request body")
             return
 
-        self._respond_cli(keyguard_cli.set_secret(path, body))
+        result = keyguard_cli.set_secret(path, body)
+        if result.ok:
+            cache.evict(path)
+        self._respond_cli(result)
 
     def do_DELETE(self) -> None:
         if not self._gate_ip():

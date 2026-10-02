@@ -28,6 +28,18 @@ def test_clear_wipes_everything():
     assert cache.get("10.0.0.2", "B") is None
 
 
+def test_should_evict_key_for_every_ip_and_keep_other_keys():
+    cache.put("10.0.0.1", "K", "V", 60)
+    cache.put("10.0.0.2", "K", "V", 60)
+    cache.put("10.0.0.1", "OTHER", "W", 60)
+
+    cache.evict("K")
+
+    assert cache.get("10.0.0.1", "K") is None
+    assert cache.get("10.0.0.2", "K") is None
+    assert cache.get("10.0.0.1", "OTHER") == "W"
+
+
 def test_get_shared_with_wildcard():
     cache.put("10.0.0.1", "K", "V", 10)
     assert cache.get_shared(["*"], "K") == "V"

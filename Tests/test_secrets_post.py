@@ -94,6 +94,31 @@ def test_non_utf8_body_returns_400(server):
     assert conn.getresponse().status == 400
 
 
+# ---- Cache eviction on set ----
+
+
+def test_should_evict_cached_value_for_every_ip_when_set_succeeds(server):
+    cache.put("127.0.0.1", "MY_TOKEN", "old-value", 60)
+    cache.put("172.17.0.5", "MY_TOKEN", "old-value", 60)
+
+    with patch("subprocess.run", return_value=cli_run_result(0, stdout="Set 'MY_TOKEN'")):
+        status, _ = http_post(server, "/MY_TOKEN", body="new-value")
+
+    assert status == 200
+    assert cache.get("127.0.0.1", "MY_TOKEN") is None
+    assert cache.get("172.17.0.5", "MY_TOKEN") is None
+
+
+def test_should_keep_cached_value_when_set_is_refused(server):
+    cache.put("172.17.0.5", "MY_TOKEN", "old-value", 60)
+
+    with patch("subprocess.run", return_value=cli_run_result(2)):
+        status, _ = http_post(server, "/MY_TOKEN", body="new-value")
+
+    assert status == 403
+    assert cache.get("172.17.0.5", "MY_TOKEN") == "old-value"
+
+
 # ---- DELETE /_cache ----
 
 

@@ -28,6 +28,13 @@ def put(ip: str, key: str, value: str, timeout: int) -> None:
         _cache[_cache_key(ip, key)] = (value, time.monotonic() + timeout)
 
 
+def evict(key: str) -> None:
+    with _cache_lock:
+        for ip, name in list(_cache):
+            if name == key:
+                del _cache[_cache_key(ip, name)]
+
+
 def clear() -> None:
     with _cache_lock:
         _cache.clear()
