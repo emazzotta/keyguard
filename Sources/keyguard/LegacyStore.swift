@@ -11,7 +11,7 @@ enum LegacyStore {
         guard let combined = try? Data(contentsOf: url) else {
             throw KeyguardError.message("No secrets file at \(url.path)")
         }
-        guard let key = Keychain.loadLegacyKey() else {
+        guard let key = try Keychain.loadLegacyKey() else {
             throw KeyguardError.message(
                 "No encryption key in the Keychain. The secrets file at \(url.path) cannot be read.")
         }

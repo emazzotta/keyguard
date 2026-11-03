@@ -205,7 +205,7 @@ func commandVerify() {
 }
 
 func establishIdentity(_ session: Session) -> AgeIdentity {
-    if let secret = Keychain.loadIdentity() {
+    if let secret = attempt({ try Keychain.loadIdentity() }) {
         let recipient = attempt {
             try session.runner.recipient(forIdentity: secret, keygenBinary: session.keygenBinary)
         }
@@ -294,7 +294,7 @@ func commandMigrate(force: Bool) {
 
 func commandExportKey() {
     authenticate(reason: "Export the store identity")
-    guard let identity = Keychain.loadIdentity() else { fail("No age identity in the Keychain") }
+    guard let identity = attempt({ try Keychain.loadIdentity() }) else { fail("No age identity in the Keychain") }
     fputs("Warning: treat this like a master password - it decrypts every secret\n", stderr)
     print(identity, terminator: "")
 }
@@ -309,7 +309,7 @@ func commandImportKey(_ identity: String) {
         }
         fail("Invalid identity: expected a string starting with AGE-SECRET-KEY-1")
     }
-    if Keychain.loadIdentity() != nil {
+    if attempt({ try Keychain.loadIdentity() }) != nil {
         fail("The Keychain already holds an age identity. Run 'keyguard clear' first to replace it.")
     }
     authenticate(reason: "Import a store identity")
@@ -320,8 +320,8 @@ func commandImportKey(_ identity: String) {
 func commandClear() {
     let session = attempt { try Session.make() }
     authenticate(reason: "Delete the store and its identity")
+    attempt { try Keychain.deleteIdentity() }
     try? FileManager.default.removeItem(at: session.store.root)
-    Keychain.deleteIdentity()
     print("Cleared the store at \(session.store.root.path) and its identity")
     if LegacyStore.exists(at: session.legacyFile) {
         print("Left the pre-age secrets file at \(session.legacyFile.path) alone")

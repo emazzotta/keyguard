@@ -14,6 +14,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
 readonly SHIM_MODULES=(Security LocalAuthentication CryptoKit Darwin)
+readonly INTERACTION_NOT_ALLOWED=-25308
 
 passes=0
 failures=0
@@ -270,6 +271,19 @@ WEIRD" "$("$keyguard" list)"
     assert_absent "should emit no secret when biometrics are denied" "$output" "jira-value"
     assert_equals "should emit nothing at all on stdout when denied" \
         "" "$(KEYGUARD_FAKE_DENY=1 "$keyguard" get JIRA_TOKEN 2>/dev/null)"
+
+    echo ""
+    echo "an unreachable Keychain"
+    output="$(KEYGUARD_FAKE_KEYCHAIN_STATUS="$INTERACTION_NOT_ALLOWED" "$keyguard" get JIRA_TOKEN 2>&1)"
+    assert_contains "should name the session as why it cannot read the identity" \
+        "$output" "outside the GUI login session"
+    assert_absent "should not send anyone to start over when the Keychain only refused" "$output" "start over"
+    assert_contains "should still offer a fresh start when the Keychain holds no identity" \
+        "$(KEYGUARD_FAKE_KEYCHAIN="$work/empty-keychain.json" "$keyguard" get JIRA_TOKEN 2>&1)" "start over"
+    assert_equals "should fail clear when the Keychain refuses to delete the identity" \
+        "1" "$(KEYGUARD_FAKE_KEYCHAIN_STATUS="$INTERACTION_NOT_ALLOWED" "$keyguard" clear >/dev/null 2>&1; echo $?)"
+    assert_equals "should keep the store when clear cannot delete the identity" \
+        "jira-value" "$("$keyguard" get JIRA_TOKEN)"
 
     echo ""
     echo "writes"

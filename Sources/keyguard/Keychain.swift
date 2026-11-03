@@ -11,18 +11,19 @@ enum Keychain {
         try store(Data(identity.utf8), account: identityAccount)
     }
 
-    static func loadIdentity() -> String? {
-        guard let data = load(account: identityAccount) else { return nil }
-        return String(decoding: data, as: UTF8.self)
+    static func loadIdentity() throws -> String? {
+        try load(account: identityAccount).map { String(decoding: $0, as: UTF8.self) }
     }
 
-    static func deleteIdentity() {
-        SecItemDelete(query(account: identityAccount) as CFDictionary)
+    static func deleteIdentity() throws {
+        let status = SecItemDelete(query(account: identityAccount) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw refusal(status, action: "delete \(identityAccount)")
+        }
     }
 
-    static func loadLegacyKey() -> SymmetricKey? {
-        guard let data = load(account: legacyKeyAccount) else { return nil }
-        return SymmetricKey(data: data)
+    static func loadLegacyKey() throws -> SymmetricKey? {
+        try load(account: legacyKeyAccount).map { SymmetricKey(data: $0) }
     }
 
     private static func query(account: String) -> [String: Any] {
@@ -46,13 +47,29 @@ enum Keychain {
         }
     }
 
-    private static func load(account: String) -> Data? {
+    private static func load(account: String) throws -> Data? {
         var attributes = query(account: account)
         attributes[kSecReturnData as String] = true
 
         var item: AnyObject?
-        guard SecItemCopyMatching(attributes as CFDictionary, &item) == errSecSuccess else { return nil }
-        return item as? Data
+        let status = SecItemCopyMatching(attributes as CFDictionary, &item)
+        switch status {
+        case errSecSuccess: return item as? Data
+        case errSecItemNotFound: return nil
+        default: throw refusal(status, action: "read \(account)")
+        }
+    }
+
+    private static func refusal(_ status: OSStatus, action: String) -> KeyguardError {
+        guard status == errSecInteractionNotAllowed else {
+            return .message("The Keychain refused to \(action): OSStatus \(status).")
+        }
+        return .message("""
+        The Keychain cannot ask to \(action) from this shell (errSecInteractionNotAllowed): \
+        it runs outside the GUI login session, for example in a tmux server started over SSH.
+        This says nothing about what the Keychain holds, so do not run 'keyguard clear' or \
+        'keyguard import-key' over it. Run keyguard from a Terminal window instead.
+        """)
     }
 }
 

@@ -58,7 +58,7 @@ struct Session {
 
         authenticate(reason: reason)
 
-        guard let identity = Keychain.loadIdentity() else {
+        guard let identity = try Keychain.loadIdentity() else {
             throw KeyguardError.message("""
             No age identity in the Keychain. The store at \(store.root.path) cannot be read.
             Restore one with 'keyguard import-key', or start over with 'keyguard clear'.

@@ -14,6 +14,7 @@ public protocol SecAccessControl {}
 
 public let errSecSuccess: OSStatus = 0
 public let errSecItemNotFound: OSStatus = -25300
+public let errSecInteractionNotAllowed: OSStatus = -25308
 
 public let kSecClass: CFString = "class"
 public let kSecClassGenericPassword: CFString = "genp"
@@ -27,6 +28,10 @@ public let kSecReturnData: CFString = "r_Data"
 public enum FakeKeychain {
     public static var path: String {
         ProcessInfo.processInfo.environment["KEYGUARD_FAKE_KEYCHAIN"] ?? "/tmp/keyguard-fake-keychain.json"
+    }
+
+    static var refusal: OSStatus? {
+        ProcessInfo.processInfo.environment["KEYGUARD_FAKE_KEYCHAIN_STATUS"].flatMap { OSStatus($0) }
     }
 
     static func load() -> [String: String] {
@@ -56,6 +61,7 @@ public func SecItemAdd(_ attributes: CFDictionary, _ result: UnsafeMutablePointe
 }
 
 public func SecItemCopyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+    if let status = FakeKeychain.refusal { return status }
     guard let encoded = FakeKeychain.load()[FakeKeychain.key(query)],
           let data = Data(base64Encoded: encoded) else { return errSecItemNotFound }
     result?.pointee = data as NSData
@@ -64,6 +70,7 @@ public func SecItemCopyMatching(_ query: CFDictionary, _ result: UnsafeMutablePo
 
 @discardableResult
 public func SecItemDelete(_ query: CFDictionary) -> OSStatus {
+    if let status = FakeKeychain.refusal { return status }
     var items = FakeKeychain.load()
     guard items.removeValue(forKey: FakeKeychain.key(query)) != nil else { return errSecItemNotFound }
     FakeKeychain.save(items)
