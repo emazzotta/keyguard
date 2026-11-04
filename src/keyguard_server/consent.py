@@ -42,11 +42,13 @@ def list_all_reason(caller: str | None = None) -> str:
 
 
 def run_reason(name: str, endpoint: Endpoint, body: str, caller: str | None = None) -> str:
-    requester = f" for {caller}" if caller else ""
-    reason = f"Run bridge endpoint {name}{requester}: {_command_text(endpoint.command)}"
+    """The self-reported caller comes last, so no title can push what will run out of view."""
+    reason = f"Run bridge endpoint {name}: {_command_text(endpoint.command)}"
     lines = body.splitlines() if endpoint.pass_stdin else []
     if lines:
         reason += f", with input {_input_text(lines)}"
+    if caller:
+        reason += f", for {caller}"
     return reason
 
 

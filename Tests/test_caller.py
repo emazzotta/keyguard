@@ -82,11 +82,20 @@ def test_should_escape_quotes_so_a_title_cannot_close_its_own():
 # ---- Bridge consent ----
 
 
-def test_should_name_the_caller_after_the_endpoint():
+def test_should_name_the_caller_after_the_command():
     endpoint = Endpoint(command=("/bin/echo", "hi"), allowed_methods=frozenset(["POST"]),
                         pass_stdin=False, timeout=10)
 
-    assert consent.run_reason("echo", endpoint, "", caller=LABEL) == f"Run bridge endpoint echo for {LABEL}: /bin/echo hi"
+    assert consent.run_reason("echo", endpoint, "", caller=LABEL) == f"Run bridge endpoint echo: /bin/echo hi, for {LABEL}"
+
+
+def test_should_name_the_caller_after_the_input():
+    endpoint = Endpoint(command=("/bin/trash",), allowed_methods=frozenset(["POST"]),
+                        pass_stdin=True, timeout=10)
+
+    reason = consent.run_reason("mac-trash", endpoint, "/a.png\n", caller=LABEL)
+
+    assert reason == f'Run bridge endpoint mac-trash: /bin/trash, with input "/a.png", for {LABEL}'
 
 
 def test_should_name_the_caller_when_listing_every_endpoint():
@@ -140,7 +149,7 @@ def test_should_show_the_caller_in_the_bridge_prompt(server, prompting_bridge):
 
     assert status == 200
     confirm = [c for c in mock_run.call_args_list if c[0][0] == [KEYGUARD, "confirm"]]
-    assert confirm[0][1]["input"] == f"Run bridge endpoint echo for {LABEL}: /bin/echo hello"
+    assert confirm[0][1]["input"] == f"Run bridge endpoint echo: /bin/echo hello, for {LABEL}"
 
 
 def test_should_show_the_caller_in_the_full_listing_prompt(server, prompting_bridge):
