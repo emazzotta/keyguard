@@ -1,4 +1,6 @@
 """Bridge config path: env var override and tilde expansion."""
+from __future__ import annotations
+
 import importlib
 import os
 import sys
