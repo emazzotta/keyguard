@@ -43,6 +43,7 @@ func printUsage() {
     Commands:
       get <KEY> [KEY...]           Retrieve one or more secrets
           [--cache-duration N]       Cache the decryption for N seconds
+          [--caller LABEL]           Name the requester in the Touch ID prompt (get, list)
       set <KEY> [VALUE]            Store a secret (prompts for value if omitted)
       delete <KEY>                 Remove a secret (alias: rm)
       mv <OLD> <NEW> [--force]     Rename a secret (alias: rename)

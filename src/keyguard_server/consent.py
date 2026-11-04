@@ -35,8 +35,15 @@ def ask(reason: str) -> CliResult | None:
         _prompt_lock.release()
 
 
-def run_reason(name: str, endpoint: Endpoint, body: str) -> str:
-    reason = f"Run bridge endpoint {name}: {_command_text(endpoint.command)}"
+def list_all_reason(caller: str | None = None) -> str:
+    if not caller:
+        return LIST_ALL_REASON
+    return f"List all bridge endpoints for {caller}, private ones included"
+
+
+def run_reason(name: str, endpoint: Endpoint, body: str, caller: str | None = None) -> str:
+    requester = f" for {caller}" if caller else ""
+    reason = f"Run bridge endpoint {name}{requester}: {_command_text(endpoint.command)}"
     lines = body.splitlines() if endpoint.pass_stdin else []
     if lines:
         reason += f", with input {_input_text(lines)}"

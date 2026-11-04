@@ -9,7 +9,7 @@ func commandGet(_ arguments: [String]) {
     }
 
     let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))",
-                             cacheDuration: parsed.cacheDuration)
+                             cacheDuration: parsed.cacheDuration, caller: parsed.caller)
 
     let session = attempt { try Session.make() }
     let unlocked = attempt { try session.unlock(reason: reason) }
@@ -137,7 +137,8 @@ func commandList(_ arguments: [String]) {
     let parsed = parseArgs(arguments)
     let session = attempt { try Session.make() }
     let unlocked = attempt {
-        try session.unlock(reason: buildReason(base: "List secrets", cacheDuration: parsed.cacheDuration))
+        try session.unlock(reason: buildReason(base: "List secrets", cacheDuration: parsed.cacheDuration,
+                                               caller: parsed.caller))
     }
     unlocked.index.entries.keys.sorted().forEach { print($0) }
 }

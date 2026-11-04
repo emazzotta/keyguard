@@ -41,18 +41,17 @@ def _run(args: list[str], stdin_value: str | None = None) -> CliResult:
     return CliResult(rc=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
 
-def get(*keys: str, cache_duration: int | None = None) -> CliResult:
-    args = ["get", *keys]
-    if cache_duration:
-        args += ["--cache-duration", str(cache_duration)]
-    return _run(args)
+def get(*keys: str, cache_duration: int | None = None, caller: str | None = None) -> CliResult:
+    return _run(["get", *keys, *_prompt_options(cache_duration, caller)])
 
 
-def list_keys(cache_duration: int | None = None) -> CliResult:
-    args = ["list"]
-    if cache_duration:
-        args += ["--cache-duration", str(cache_duration)]
-    return _run(args)
+def list_keys(cache_duration: int | None = None, caller: str | None = None) -> CliResult:
+    return _run(["list", *_prompt_options(cache_duration, caller)])
+
+
+def _prompt_options(cache_duration: int | None, caller: str | None) -> list[str]:
+    options = ["--cache-duration", str(cache_duration)] if cache_duration else []
+    return options + (["--caller", caller] if caller else [])
 
 
 def set_secret(name: str, value: str) -> CliResult:

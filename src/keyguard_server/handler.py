@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from . import access_log, bridge, cache, consent, encoding, keyguard_cli
+from .caller import SESSION_HEADER, TITLE_HEADER, Caller
 from .config import (
     MAX_BRIDGE_OUTPUT_BYTES,
     MAX_CACHE_TIMEOUT,
@@ -102,7 +103,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         client_ip = self.client_address[0]
 
         if not timeout:
-            self._respond_cli(keyguard_cli.list_keys())
+            self._respond_cli(keyguard_cli.list_keys(caller=self._caller.label))
             return
 
         cached = cache.get(client_ip, _KEYS_PATH)
@@ -110,7 +111,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(200, cached.encode())
             return
 
-        result = keyguard_cli.list_keys(cache_duration=timeout)
+        result = keyguard_cli.list_keys(cache_duration=timeout, caller=self._caller.label)
         if not self._respond_cli_or_handle_error(result):
             return
         cache.put(client_ip, _KEYS_PATH, result.stdout, timeout)
@@ -122,9 +123,9 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         timeout = encoding.parse_timeout(query, MAX_CACHE_TIMEOUT)
 
         if not timeout:
-            result = keyguard_cli.get(*keys)
+            result = keyguard_cli.get(*keys, caller=self._caller.label)
             if self._respond_cli_or_handle_error(result):
-                access_log.log_access(keys, client_ip, cached=False, source_hint=source_hint)
+                self._log_access(keys, cached=False, source_hint=source_hint)
             return
 
         share_ips = cache.parse_share(query, client_ip)
@@ -137,11 +138,11 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if all(v is not None for v in cached_values.values()):
             body = encoding.format_response(keys, cached_values)
             self._respond(200, body.encode())
-            access_log.log_access(keys, client_ip, cached=True, source_hint=source_hint)
+            self._log_access(keys, cached=True, source_hint=source_hint)
             return
 
         missing = [k for k in keys if cached_values[k] is None]
-        result = keyguard_cli.get(*missing, cache_duration=timeout)
+        result = keyguard_cli.get(*missing, cache_duration=timeout, caller=self._caller.label)
         if not self._respond_cli_or_handle_error(result, suppress_success=True):
             return
 
@@ -152,7 +153,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         all_values = {k: cached_values[k] if cached_values[k] is not None else fresh.get(k) for k in keys}
         body = encoding.format_response(keys, all_values)
         self._respond(200, body.encode())
-        access_log.log_access(keys, client_ip, cached=False, source_hint=source_hint)
+        self._log_access(keys, cached=False, source_hint=source_hint)
 
     # ---- Bridge handler ----
 
@@ -180,14 +181,15 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             self._respond(405, b"Method not allowed")
             return
 
-        if not endpoint.public and not self._confirm(consent.run_reason(name, endpoint, body)):
+        if not endpoint.public and not self._confirm(
+                consent.run_reason(name, endpoint, body, caller=self._caller.label)):
             return
 
         self._execute_bridge(name, endpoint, body)
 
     def _handle_bridge_list(self, query: dict[str, list[str]]) -> None:
         include_private = query.get(_LIST_ALL_PARAM) == ["1"]
-        if include_private and not self._confirm(consent.LIST_ALL_REASON):
+        if include_private and not self._confirm(consent.list_all_reason(self._caller.label)):
             return
         payload = json.dumps(bridge.list_endpoints(public_only=not include_private)).encode()
         self._respond(200, payload, content_type="application/json")
@@ -206,7 +208,6 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
     def _execute_bridge(self, name: str, endpoint: bridge.Endpoint, body: str) -> None:
         stdin_data = body if endpoint.pass_stdin else None
-        client_ip = self.client_address[0]
 
         try:
             result = subprocess.run(
@@ -227,10 +228,20 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if result.returncode == 0:
             output = result.stdout[:MAX_BRIDGE_OUTPUT_BYTES]
             self._respond(200, output.encode())
-            access_log.log_access([f"bridge:{name}"], client_ip, cached=False)
+            self._log_access([f"bridge:{name}"], cached=False)
         else:
             error = (result.stderr or result.stdout)[:MAX_BRIDGE_OUTPUT_BYTES]
             self._respond(500, error.encode())
+
+    # ---- Requester ----
+
+    @property
+    def _caller(self) -> Caller:
+        return Caller.parse(self.headers.get(SESSION_HEADER), self.headers.get(TITLE_HEADER))
+
+    def _log_access(self, keys: list[str], cached: bool, source_hint: str | None = None) -> None:
+        access_log.log_access(keys, self.client_address[0], cached=cached,
+                              source_hint=source_hint, session=self._caller.session)
 
     # ---- Response helpers ----
 

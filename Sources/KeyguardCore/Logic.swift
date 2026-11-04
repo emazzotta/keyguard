@@ -44,30 +44,43 @@ public func serializeEnv(_ entries: [String: String]) -> String {
 public struct ParsedArgs {
     public let positional: [String]
     public let cacheDuration: Int?
+    public let caller: String?
 
-    public init(positional: [String], cacheDuration: Int?) {
+    public init(positional: [String], cacheDuration: Int?, caller: String? = nil) {
         self.positional = positional
         self.cacheDuration = cacheDuration
+        self.caller = caller
     }
 }
 
 public func parseArgs(_ args: [String]) -> ParsedArgs {
     var positional: [String] = []
     var cacheDuration: Int?
+    var caller: String?
     var i = 0
     while i < args.count {
         if args[i] == "--cache-duration", i + 1 < args.count, let duration = Int(args[i + 1]) {
             cacheDuration = duration
+            i += 2
+        } else if args[i] == "--caller", i + 1 < args.count {
+            caller = args[i + 1]
             i += 2
         } else {
             positional.append(args[i])
             i += 1
         }
     }
-    return ParsedArgs(positional: positional, cacheDuration: cacheDuration)
+    return ParsedArgs(positional: positional, cacheDuration: cacheDuration, caller: caller)
 }
 
-public func buildReason(base: String, cacheDuration: Int?) -> String {
-    guard let duration = cacheDuration else { return base }
-    return "\(base) (cached for \(duration)s)"
+/// The Touch ID reason: what runs, who the caller says it acts for, how long the result is kept.
+public func buildReason(base: String, cacheDuration: Int?, caller: String? = nil) -> String {
+    var reason = base
+    if let caller, !caller.isEmpty {
+        reason += " for \(caller)"
+    }
+    if let cacheDuration {
+        reason += ", cached for \(cacheDuration)s"
+    }
+    return reason
 }
