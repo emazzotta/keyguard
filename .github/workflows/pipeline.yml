@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: "3.15"
-      - run: pip install -r Tests/requirements.txt
+      - run: uv sync --locked
       - run: make test-python

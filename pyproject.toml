@@ -1,0 +1,13 @@
+[project]
+name = "keyguard"
+version = "0.1.0"
+description = "Local macOS secret manager that gates every decryption behind Touch ID"
+requires-python = ">=3.9"
+dependencies = [
+    "pyyaml",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
