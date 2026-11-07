@@ -1,4 +1,4 @@
-"""The Claude session a client says it acts for, named in Touch ID prompts.
+"""The Claude Code or opencode session a client claims, named in Touch ID prompts.
 
 The client reports the session in two headers and nothing here proves them: the label
 tells the approver which session to look at, never who really asked.
@@ -15,7 +15,7 @@ SESSION_HEADER: Final = "X-Keyguard-Session"
 TITLE_HEADER: Final = "X-Keyguard-Title"
 MAX_TITLE_CHARS: Final = 80
 CLIPPED: Final = "…"
-_SESSION: Final = re.compile(r"[0-9a-f]{8}")
+_SESSION: Final = re.compile(r"[0-9A-Za-z]{8}")
 _DROPPED_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
 
 

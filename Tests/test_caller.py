@@ -40,8 +40,12 @@ def test_should_name_what_the_client_reported(session, title, label):
     assert Caller.parse(session, title).label == label
 
 
-@pytest.mark.parametrize("session", ["48F92BCB", "48f92bc", "48f92bcb0", "48f92bcb-f080", "zzzzzzzz", " 48f92bcb"])
-def test_should_drop_a_session_that_is_not_eight_lowercase_hex_digits(session):
+def test_should_name_an_opencode_session_by_the_end_of_its_id():
+    assert Caller.parse("G3yIYwxa", QUOTED_TITLE).label == f'"{TITLE}" (G3yIYwxa)'
+
+
+@pytest.mark.parametrize("session", ["48f92bc", "48f92bcb0", "48f92bcb-f080", "48f92bc!", "48f92bc_", " 48f92bcb"])
+def test_should_drop_a_session_that_is_not_eight_letters_or_digits(session):
     assert Caller.parse(session, None).session is None
 
 
