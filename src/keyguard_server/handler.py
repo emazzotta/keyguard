@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from . import access_log, bridge, cache, consent, encoding, keyguard_cli, phone
-from .caller import SESSION_HEADER, TITLE_HEADER, Caller
+from .caller import PANE_HEADER, SESSION_HEADER, TITLE_HEADER, Caller
 from .config import (
     MAX_BRIDGE_OUTPUT_BYTES,
     MAX_CACHE_TIMEOUT,
@@ -244,7 +244,8 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
     @property
     def _caller(self) -> Caller:
-        return Caller.parse(self.headers.get(SESSION_HEADER), self.headers.get(TITLE_HEADER))
+        headers = self.headers
+        return Caller.parse(headers.get(SESSION_HEADER), headers.get(TITLE_HEADER), headers.get(PANE_HEADER))
 
     def _log_access(self, keys: list[str], cached: bool, source_hint: str | None = None) -> None:
         access_log.log_access(keys, self.client_address[0], cached=cached,

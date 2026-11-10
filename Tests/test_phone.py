@@ -91,6 +91,16 @@ def test_should_answer_a_single_key_with_its_bare_value_as_keyguard_does(touch_i
     assert (result.ok, result.stdout) == (True, "multi\nline")
 
 
+def test_should_run_the_client_in_the_pane_the_caller_reports(touch_id, client):
+    touch_id(WAIT_FOR_SIGNAL)
+
+    answers_its_pane = client("printf \"export A='%s'\\n\" \"$TMUX_PANE\"")
+
+    result = phone.race(["A"], Caller(pane="%6"), answers_its_pane, timing=FAST)
+
+    assert (result.ok, result.stdout) == (True, "%6")
+
+
 def test_should_keep_waiting_on_touch_id_when_the_phone_client_fails(touch_id, client):
     touch_id("sleep 1; printf secret")
 
@@ -170,6 +180,14 @@ def test_should_pass_an_empty_caller_so_the_client_never_guesses_one(tmp_path):
     assert argv[argv.index("--session") + 1] == "" and argv[argv.index("--title") + 1] == ""
 
 
+def test_should_name_the_asking_pane_to_the_client_as_tmux_would():
+    assert phone.client_env("%6")["TMUX_PANE"] == "%6"
+
+
+def test_should_name_no_pane_to_the_client_when_the_caller_reports_none():
+    assert "TMUX_PANE" not in phone.client_env()
+
+
 def test_should_find_openssl_3_before_any_other_openssl():
     assert phone.client_env()["PATH"].split(":")[0] == "/opt/homebrew/opt/openssl@3/bin"
 
@@ -228,7 +246,7 @@ def test_should_race_the_phone_on_every_read_once_configured(server, monkeypatch
 
     monkeypatch.setattr(phone, "race", race)
 
-    status, body = http_get(server, path, {"X-Keyguard-Session": "48f92bcb"})
+    status, body = http_get(server, path, {"X-Keyguard-Session": "48f92bcb", "X-Keyguard-Pane": "%6"})
 
     assert (status, body) == (200, "A=1\nB=2\n")
-    assert seen == {"keys": ["A", "B"], "caller": Caller(session="48f92bcb"), "client": asking}
+    assert seen == {"keys": ["A", "B"], "caller": Caller(session="48f92bcb", pane="%6"), "client": asking}

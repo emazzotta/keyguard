@@ -83,6 +83,22 @@ def test_should_escape_quotes_so_a_title_cannot_close_its_own():
     assert label == f'"\\": /bin/true \\\\" ({SESSION})'
 
 
+# ---- Pane ----
+
+
+def test_should_keep_the_tmux_pane_the_client_reports():
+    assert Caller.parse(None, None, "%6").pane == "%6"
+
+
+@pytest.mark.parametrize("pane", ["6", "%", "%x", "%1234567", " %6", "%6\n", "devbox:%6"])
+def test_should_drop_a_pane_that_is_not_a_tmux_pane_id(pane):
+    assert Caller.parse(None, None, pane).pane is None
+
+
+def test_should_leave_the_pane_out_of_the_label():
+    assert Caller.parse(SESSION, QUOTED_TITLE, "%6").label == LABEL
+
+
 # ---- Bridge consent ----
 
 

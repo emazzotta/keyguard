@@ -1,7 +1,8 @@
 """The Claude Code or opencode session a client claims, named in Touch ID prompts.
 
-The client reports the session in two headers and nothing here proves them: the label
-tells the approver which session to look at, never who really asked.
+The client reports the session in two headers and its tmux pane in a third, and nothing here
+proves them: the label tells the approver which session to look at, the pane which one the web
+terminal shows, never who really asked.
 """
 from __future__ import annotations
 
@@ -13,9 +14,11 @@ from urllib.parse import unquote
 
 SESSION_HEADER: Final = "X-Keyguard-Session"
 TITLE_HEADER: Final = "X-Keyguard-Title"
+PANE_HEADER: Final = "X-Keyguard-Pane"
 MAX_TITLE_CHARS: Final = 80
 CLIPPED: Final = "…"
 _SESSION: Final = re.compile(r"[0-9A-Za-z]{8}")
+_PANE: Final = re.compile(r"%\d{1,6}")
 _DROPPED_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
 
 
@@ -23,11 +26,12 @@ _DROPPED_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
 class Caller:
     session: str | None = None
     title: str | None = None
+    pane: str | None = None
 
     @classmethod
-    def parse(cls, session: str | None, title: str | None) -> Caller:
+    def parse(cls, session: str | None, title: str | None, pane: str | None = None) -> Caller:
         """Builds a caller from the raw header values, dropping what does not hold up."""
-        return cls(session=_session(session), title=_title(title))
+        return cls(session=_session(session), title=_title(title), pane=_pane(pane))
 
     @property
     def label(self) -> str | None:
@@ -42,6 +46,10 @@ class Caller:
 
 def _session(value: str | None) -> str | None:
     return value if value and _SESSION.fullmatch(value) else None
+
+
+def _pane(value: str | None) -> str | None:
+    return value if value and _PANE.fullmatch(value) else None
 
 
 def _title(value: str | None) -> str | None:

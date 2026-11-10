@@ -33,6 +33,7 @@ from .config import (
 from .keyguard_cli import CliResult
 
 _EXPORT = "export"
+_PANE_ENV = "TMUX_PANE"
 
 
 class Side(Enum):
@@ -72,9 +73,11 @@ def configured(client: Path | None = PHONE_CLIENT, signing_key: Path | None = PH
     return PhoneClient(client, signing_key)
 
 
-def client_env() -> dict[str, str]:
-    """launchd hands the server a bare environment; the client needs Homebrew's age and openssl@3."""
-    return {"HOME": str(Path.home()), "PATH": PHONE_PATH, "PYTHONIOENCODING": "utf-8", "LANG": "en_US.UTF-8"}
+def client_env(pane: str | None = None) -> dict[str, str]:
+    """launchd hands the server a bare environment; the client needs Homebrew's age and openssl@3, and
+    records the asking pane from TMUX_PANE, as it does when it runs in that pane."""
+    env = {"HOME": str(Path.home()), "PATH": PHONE_PATH, "PYTHONIOENCODING": "utf-8", "LANG": "en_US.UTF-8"}
+    return env if pane is None else {**env, _PANE_ENV: pane}
 
 
 def parse_exports(stdout: str, keys: list[str]) -> dict[str, str] | None:
@@ -219,8 +222,8 @@ class _Race:
                          timed_out=touch_id.timed_out)
 
     def _ask_phone(self) -> None:
-        self._phone = _Child(Side.PHONE, self._client.argv(self._keys, self._caller), client_env(), self._exits,
-                             self._timing.deadline)
+        argv = self._client.argv(self._keys, self._caller)
+        self._phone = _Child(Side.PHONE, argv, client_env(self._caller.pane), self._exits, self._timing.deadline)
 
     def _stop_in_background(self, child: _Child) -> None:
         """Answers the caller at once; the client then has its grace to withdraw its request."""
