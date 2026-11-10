@@ -4,7 +4,14 @@ public typealias NSErrorPointer = UnsafeMutablePointer<NSError?>?
 
 public enum LABiometryType { case none, touchID, faceID }
 public enum LACredentialType { case applicationPassword }
-public enum LAError: Error { case authenticationFailed }
+/// Mirrors the LAError macOS bridges an evaluatePolicy failure into: its code tells the owner's cancel from the system's.
+public struct LAError: Error {
+    public enum Code { case authenticationFailed, userCancel, userFallback, systemCancel }
+
+    public let code: Code
+
+    public init(_ code: Code) { self.code = code }
+}
 
 public enum LAPolicy {
     case deviceOwnerAuthenticationWithBiometrics
@@ -17,6 +24,11 @@ public enum FakePrompts {
 
     public static var denies: Bool {
         ProcessInfo.processInfo.environment["KEYGUARD_FAKE_DENY"] == "1"
+    }
+
+    /// The prompt ends with no answer from the owner, as on a locked screen.
+    public static var systemCancels: Bool {
+        ProcessInfo.processInfo.environment["KEYGUARD_FAKE_SYSTEM_CANCEL"] == "1"
     }
 
     static func record(_ reason: String) {
@@ -39,6 +51,10 @@ public final class LAContext {
                                localizedReason: String,
                                reply: @escaping (Bool, Error?) -> Void) {
         FakePrompts.record(localizedReason)
-        reply(!FakePrompts.denies, FakePrompts.denies ? NSError(domain: "fake", code: 1) : nil)
+        if FakePrompts.systemCancels {
+            reply(false, LAError(.systemCancel))
+        } else {
+            reply(!FakePrompts.denies, FakePrompts.denies ? LAError(.userCancel) : nil)
+        }
     }
 }

@@ -120,6 +120,8 @@ confirm_tests() {
     assert_equals "should refuse an empty reason" "1" \
         "$(printf ' \n' | KEYGUARD_FAKE_PROMPTS="$prompts" "$keyguard" confirm >/dev/null 2>&1; echo $?)"
     assert_equals "should never prompt for an empty reason" "2" "$(wc -l < "$prompts" | tr -d ' ')"
+    assert_equals "should exit 3 when the system ends the prompt, as a locked screen does" "3" \
+        "$(printf '%s' "$reason" | KEYGUARD_FAKE_PROMPTS="$prompts" KEYGUARD_FAKE_SYSTEM_CANCEL=1 "$keyguard" confirm >/dev/null 2>&1; echo $?)"
 }
 
 service_meta_field() {
@@ -271,6 +273,10 @@ WEIRD" "$("$keyguard" list)"
     assert_absent "should emit no secret when biometrics are denied" "$output" "jira-value"
     assert_equals "should emit nothing at all on stdout when denied" \
         "" "$(KEYGUARD_FAKE_DENY=1 "$keyguard" get JIRA_TOKEN 2>/dev/null)"
+    assert_equals "should exit 3 when the system ends the prompt, so the server asks the phone" \
+        "3" "$(KEYGUARD_FAKE_SYSTEM_CANCEL=1 "$keyguard" get JIRA_TOKEN >/dev/null 2>&1; echo $?)"
+    assert_equals "should emit nothing on stdout when the system ends the prompt" \
+        "" "$(KEYGUARD_FAKE_SYSTEM_CANCEL=1 "$keyguard" get JIRA_TOKEN 2>/dev/null)"
 
     echo ""
     echo "an unreachable Keychain"

@@ -99,8 +99,12 @@ def test_should_keep_waiting_on_touch_id_when_the_phone_client_fails(touch_id, c
     assert (result.ok, result.stdout) == (True, "secret")
 
 
-def test_should_ask_the_phone_at_once_when_touch_id_fails_without_a_cancel(touch_id, client):
-    touch_id("echo 'Biometrics unavailable: no fingerprint sensor' >&2; exit 1")
+@pytest.mark.parametrize("ending", [
+    "echo 'Biometrics unavailable: no fingerprint sensor' >&2; exit 1",
+    "echo 'Authentication failed: Authentication canceled.' >&2; exit 3",
+])
+def test_should_ask_the_phone_at_once_when_touch_id_ends_without_the_owners_cancel(touch_id, client, ending):
+    touch_id(ending)
     started = time.monotonic()
 
     result = phone.race(["A", "B"], NOBODY, client(EXPORTS_A_B), timing=phone.Timing(delay=30.0, deadline=40.0))
