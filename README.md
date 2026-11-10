@@ -162,6 +162,17 @@ curl -s -X POST http://host.docker.internal:7777/MY_API_TOKEN -d 'the-value'
 
 The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
 
+### Phone fallback
+
+A read can also be approved on the phone, for when nobody is at the Mac. The Touch ID prompt shows at once. If nobody answers it within 15 s, the server also runs the unlock client from personal-infra (`apps/devbox/unlock`) as host `mac`. The client posts a signed request to the unlock service, and the web terminal and the phone's approve page can release it with a passkey. The first answer wins: Touch ID's ends the client, which withdraws its request, and the phone's closes the Touch ID prompt. A Touch ID cancel is a no and ends the read. A Touch ID failure that is not a cancel, such as no fingerprint sensor with the lid closed, asks the phone at once. A failing client leaves the Touch ID prompt up. A read now waits up to 345 s.
+
+It is off until both files exist:
+
+- `make install` copies the client into `/usr/local/lib/keyguard/unlock/`, owned by root, from `$KEYGUARD_UNLOCK_CLIENT_SRC` (default `~/Projects/private/personal-infra/apps/devbox/unlock`). The server never runs it from a checkout that a container can write.
+- The Mac's Ed25519 signing key at `$KEYGUARD_PHONE_SIGNING_KEY` (default `~/.keyguard/mac-sign.key`, mode 0600). Back it up in keyguard as `MAC_SIGN`, and pin its public half once on each approving browser at `/approve?pin=mac`.
+
+The client needs Homebrew's `age` and `openssl@3` (LibreSSL lacks `pkeyutl -rawin`). The Mac must be signed in to Tailscale as the store's user, since the unlock service takes the Mac's tailnet identity in place of a request token.
+
 ## Bridge endpoints
 
 The bridge lets you expose whitelisted Mac commands over HTTP. A Docker container can trigger a Spotify pause, send a system notification, or call any script you pre-approve — without SSH, without scripting on the host, and without exposing arbitrary command execution.

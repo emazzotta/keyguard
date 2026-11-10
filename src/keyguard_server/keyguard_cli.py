@@ -1,4 +1,4 @@
-"""Wrapper around the keyguard CLI binary - one place that calls subprocess."""
+"""Wrapper around the keyguard CLI binary. phone.py starts the same `get` command itself, to race it."""
 from __future__ import annotations
 
 import subprocess
@@ -24,10 +24,14 @@ class CliResult:
         return self.rc == 2
 
 
+def command(args: list[str]) -> list[str]:
+    return [str(KEYGUARD_BIN), *args]
+
+
 def _run(args: list[str], stdin_value: str | None = None) -> CliResult:
     try:
         result = subprocess.run(
-            [str(KEYGUARD_BIN)] + args,
+            command(args),
             capture_output=True, text=True, errors="replace",
             timeout=SUBPROCESS_TIMEOUT,
             input=stdin_value,
@@ -41,8 +45,12 @@ def _run(args: list[str], stdin_value: str | None = None) -> CliResult:
     return CliResult(rc=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
 
+def get_args(*keys: str, cache_duration: int | None = None, caller: str | None = None) -> list[str]:
+    return ["get", *keys, *_prompt_options(cache_duration, caller)]
+
+
 def get(*keys: str, cache_duration: int | None = None, caller: str | None = None) -> CliResult:
-    return _run(["get", *keys, *_prompt_options(cache_duration, caller)])
+    return _run(get_args(*keys, cache_duration=cache_duration, caller=caller))
 
 
 def list_keys(cache_duration: int | None = None, caller: str | None = None) -> CliResult:

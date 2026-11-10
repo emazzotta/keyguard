@@ -17,6 +17,10 @@
         <string>__BRIDGE_CONFIG_FILE__</string>
         <key>KEYGUARD_LOG_FILE</key>
         <string>__LOG_FILE__</string>
+        <key>KEYGUARD_PHONE_CLIENT</key>
+        <string>__PHONE_CLIENT__</string>
+        <key>KEYGUARD_PHONE_SIGNING_KEY</key>
+        <string>__PHONE_SIGNING_KEY__</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>

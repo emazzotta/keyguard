@@ -7,7 +7,7 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
-from . import access_log, bridge, cache, consent, encoding, keyguard_cli
+from . import access_log, bridge, cache, consent, encoding, keyguard_cli, phone
 from .caller import SESSION_HEADER, TITLE_HEADER, Caller
 from .config import (
     MAX_BRIDGE_OUTPUT_BYTES,
@@ -123,7 +123,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         timeout = encoding.parse_timeout(query, MAX_CACHE_TIMEOUT)
 
         if not timeout:
-            result = keyguard_cli.get(*keys, caller=self._caller.label)
+            result = self._read(keys)
             if self._respond_cli_or_handle_error(result):
                 self._log_access(keys, cached=False, source_hint=source_hint)
             return
@@ -142,7 +142,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             return
 
         missing = [k for k in keys if cached_values[k] is None]
-        result = keyguard_cli.get(*missing, cache_duration=timeout, caller=self._caller.label)
+        result = self._read(missing, cache_duration=timeout)
         if not self._respond_cli_or_handle_error(result, suppress_success=True):
             return
 
@@ -154,6 +154,13 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         body = encoding.format_response(keys, all_values)
         self._respond(200, body.encode())
         self._log_access(keys, cached=False, source_hint=source_hint)
+
+    def _read(self, keys: list[str], cache_duration: int | None = None) -> CliResult:
+        """Touch ID alone, or raced against the phone once the Mac has the phone client installed."""
+        client = phone.configured()
+        if client is None:
+            return keyguard_cli.get(*keys, cache_duration=cache_duration, caller=self._caller.label)
+        return phone.race(keys, self._caller, client, cache_duration=cache_duration)
 
     # ---- Bridge handler ----
 

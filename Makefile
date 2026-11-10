@@ -7,6 +7,8 @@ LOGS_DIR           := $(HOME)/Library/Logs
 SECRETS_FILE       ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.enc)
 BRIDGE_CONFIG_FILE ?= $(or $(KEYGUARD_BRIDGE_CONFIG_FILE),$(HOME)/.mac-bridge-endpoints.yaml)
 LOG_FILE           ?= $(or $(KEYGUARD_LOG_FILE),$(HOME)/.keyguard/access.log)
+UNLOCK_CLIENT_SRC  ?= $(or $(KEYGUARD_UNLOCK_CLIENT_SRC),$(HOME)/Projects/private/personal-infra/apps/devbox/unlock)
+PHONE_SIGNING_KEY  ?= $(or $(KEYGUARD_PHONE_SIGNING_KEY),$(HOME)/.keyguard/mac-sign.key)
 
 CORE_SOURCES      := $(wildcard Sources/KeyguardCore/*.swift)
 CLI_SOURCES       := $(wildcard Sources/keyguard/*.swift)
@@ -15,6 +17,7 @@ SWIFT_TEST_SUITES := $(basename $(notdir $(wildcard Tests/KeyguardCoreTests/*.sw
 BINARY     := $(PREFIX)/bin/keyguard
 SERVER_DIR := $(PREFIX)/lib/keyguard
 SERVER     := $(SERVER_DIR)/keyguard-server.py
+UNLOCK_DIR := $(SERVER_DIR)/unlock
 PLIST      := $(LAUNCH_AGENTS)/com.keyguard.server.plist
 
 all: clean build install restart ## Build, install, and restart the server
@@ -73,8 +76,15 @@ install: build ## Install binary, server, and register launchd agent
 	sudo install -m 755 bin/keyguard "$(BINARY)"
 	sudo install -m 755 src/keyguard-server.py "$(SERVER)"
 	sudo install -m 644 src/keyguard_server/*.py "$(SERVER_DIR)/keyguard_server/"
+	@if [ -f "$(UNLOCK_CLIENT_SRC)/unlock.py" ]; then \
+		sudo install -d "$(UNLOCK_DIR)" && \
+		sudo install -m 755 "$(UNLOCK_CLIENT_SRC)/unlock.py" "$(UNLOCK_CLIENT_SRC)/pending.py" "$(UNLOCK_DIR)/" && \
+		sudo install -m 644 "$(UNLOCK_CLIENT_SRC)/unlock_client.py" "$(UNLOCK_CLIENT_SRC)/hold.py" "$(UNLOCK_DIR)/"; \
+	else \
+		echo "No unlock client in $(UNLOCK_CLIENT_SRC): reads stay Touch ID only."; \
+	fi
 	mkdir -p "$(LAUNCH_AGENTS)" "$(LOGS_DIR)"
-	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g; s|__LOG_FILE__|$(LOG_FILE)|g' \
+	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g; s|__LOG_FILE__|$(LOG_FILE)|g; s|__PHONE_CLIENT__|$(UNLOCK_DIR)/unlock.py|g; s|__PHONE_SIGNING_KEY__|$(PHONE_SIGNING_KEY)|g' \
 		com.keyguard.server.plist > "$(PLIST)"
 	@echo "Installed. Run 'make start' to start the server."
 
