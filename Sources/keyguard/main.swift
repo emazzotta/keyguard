@@ -58,7 +58,8 @@ func printUsage() {
           [--tier high,low]          Tiers to remove it from (default both)
       verify                       Check the store against its manifest
       push                         Send local store changes to the service
-      pull                         Refresh the local store from the service
+      pull [--discard-local]       Refresh the local store from the service
+                                     --discard-local drops changes the service never received
       init                         Create an empty store
       migrate [--force]            Convert a pre-age secrets file into the store
       import-key [IDENTITY]        Import an age identity into the Keychain
@@ -163,7 +164,7 @@ case "push":
     commandPush()
 
 case "pull":
-    commandPull()
+    commandPull(discardingLocalChanges: args.contains("--discard-local"))
 
 case "init":
     commandInit()

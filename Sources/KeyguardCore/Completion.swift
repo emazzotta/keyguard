@@ -13,6 +13,7 @@ public enum Completion {
         case "get", "list": return ["--cache-duration"]
         case "import", "migrate", "mv", "rename": return ["--force"]
         case "add-recipient", "remove-recipient": return ["--tier"]
+        case "pull": return ["--discard-local"]
         default: return []
         }
     }

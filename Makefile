@@ -5,6 +5,7 @@ PREFIX             ?= /usr/local
 LAUNCH_AGENTS      := $(HOME)/Library/LaunchAgents
 LOGS_DIR           := $(HOME)/Library/Logs
 SECRETS_FILE       ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.enc)
+STORE_URL          ?= $(KEYGUARD_STORE_URL)
 BRIDGE_CONFIG_FILE ?= $(or $(KEYGUARD_BRIDGE_CONFIG_FILE),$(HOME)/.mac-bridge-endpoints.yaml)
 LOG_FILE           ?= $(or $(KEYGUARD_LOG_FILE),$(HOME)/.keyguard/access.log)
 UNLOCK_CLIENT_SRC  ?= $(or $(KEYGUARD_UNLOCK_CLIENT_SRC),$(HOME)/Projects/private/personal-infra/apps/devbox/unlock)
@@ -40,6 +41,9 @@ help: ## Show available targets
 	@echo ""
 	@echo "  Custom secrets file path:"
 	@echo "    export KEYGUARD_SECRETS_FILE=/path/to/secrets.enc"
+	@echo ""
+	@echo "  Store service the server syncs with:"
+	@echo "    export KEYGUARD_STORE_URL=https://unlock.example.ts.net"
 	@echo ""
 	@echo "  Custom bridge config path:"
 	@echo "    export KEYGUARD_BRIDGE_CONFIG_FILE=/path/to/bridge.yaml"
@@ -84,7 +88,7 @@ install: build ## Install binary, server, and register launchd agent
 		echo "No unlock client in $(UNLOCK_CLIENT_SRC): reads stay Touch ID only."; \
 	fi
 	mkdir -p "$(LAUNCH_AGENTS)" "$(LOGS_DIR)"
-	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g; s|__LOG_FILE__|$(LOG_FILE)|g; s|__PHONE_CLIENT__|$(UNLOCK_DIR)/unlock.py|g; s|__PHONE_SIGNING_KEY__|$(PHONE_SIGNING_KEY)|g' \
+	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__STORE_URL__|$(STORE_URL)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g; s|__LOG_FILE__|$(LOG_FILE)|g; s|__PHONE_CLIENT__|$(UNLOCK_DIR)/unlock.py|g; s|__PHONE_SIGNING_KEY__|$(PHONE_SIGNING_KEY)|g' \
 		com.keyguard.server.plist > "$(PLIST)"
 	@echo "Installed. Run 'make start' to start the server."
 

@@ -53,7 +53,7 @@ struct Session {
     }
 
     func unlock(reason: String, requireService: Bool = false) throws -> (identity: String, index: StoreIndex) {
-        try refresh(requireService: requireService)
+        let unpushed = try refresh(requireService: requireService)
         guard store.exists else { throw KeyguardError.message(notInitialisedMessage) }
 
         authenticate(reason: reason)
@@ -70,6 +70,7 @@ struct Session {
         try validateRecipients(pinned: pinned,
                                canonical: index.recipients,
                                highestSeenVersion: pinned.version)
+        nameLocalOnlySecrets(in: unpushed, index: index)
         return (identity, index)
     }
 
@@ -78,7 +79,7 @@ struct Session {
         do {
             _ = try sync.push()
         } catch RemoteStoreError.conflict(let current) {
-            _ = try? sync.pull()
+            _ = try? sync.pull(discardingLocalChanges: true)
             throw KeyguardError.message("""
             The store changed on the service (now version \(current)) while you were writing, so the \
             change was not applied. The local cache has been restored; re-run the command.
@@ -88,12 +89,14 @@ struct Session {
         }
     }
 
-    private func refresh(requireService: Bool) throws {
-        guard let sync else { return }
+    private func refresh(requireService: Bool) throws -> [String] {
+        guard let sync else { return [] }
         do {
-            if case .remoteEmpty = try sync.pull() {
-                fputs("The store service has no store yet; run 'keyguard push' to seed it.\n", stderr)
-            }
+            return try settle(sync.pull(), sync: sync, beforeWrite: requireService)
+        } catch let error as StoreDivergence {
+            if requireService { throw KeyguardError.message(describe(error)) }
+            fputs("\(describe(error))\nReading the local store, which lacks the service's newer changes.\n", stderr)
+            return error.unpushed
         } catch let error as RemoteStoreError {
             guard case .unreachable = error else {
                 throw KeyguardError.message("Store service error: \(error)")
@@ -103,7 +106,31 @@ struct Session {
                     "The store service is unreachable, so nothing was written. Try again on the tailnet.")
             }
             fputs("Store service unreachable; reading the local cache.\n", stderr)
+            return []
         }
+    }
+
+    private func settle(_ outcome: SyncOutcome, sync: StoreSync, beforeWrite: Bool) throws -> [String] {
+        switch outcome {
+        case .remoteEmpty:
+            fputs("The store service has no store yet; run 'keyguard push' to seed it.\n", stderr)
+        case .localAhead(let unpushed):
+            guard beforeWrite, store.exists else {
+                fputs("The local store holds changes the store service has not received. "
+                      + "Run 'keyguard push' to send them.\n", stderr)
+                return unpushed
+            }
+            _ = try sync.push()
+        case .upToDate, .pulled, .pushed:
+            break
+        }
+        return []
+    }
+
+    private func nameLocalOnlySecrets(in unpushed: [String], index: StoreIndex) {
+        let names = index.entries.filter { unpushed.contains($0.value.file) }.keys.sorted()
+        guard !names.isEmpty else { return }
+        fputs("Only in the local store: \(names.joined(separator: ", "))\n", stderr)
     }
 
     func loadPinned() throws -> RecipientSet {

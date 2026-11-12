@@ -336,17 +336,22 @@ func commandPush() {
     switch attempt({ try sync.push() }) {
     case .pushed(let version): print("Pushed to the store service; now at version \(version)")
     case .upToDate: print("The store service is already up to date")
-    case .remoteEmpty, .pulled: break
+    case .remoteEmpty, .pulled, .localAhead: break
     }
 }
 
-func commandPull() {
+func commandPull(discardingLocalChanges: Bool) {
     let session = attempt { try Session.make() }
     guard let sync = session.sync else { fail("No store service configured. Set \(Locations.storeURLVariable).") }
-    switch attempt({ try sync.pull() }) {
+    switch attempt({ try sync.pull(discardingLocalChanges: discardingLocalChanges) }) {
     case .pulled(let version): print("Pulled from the store service; local cache now at version \(version)")
     case .upToDate: print("Already up to date with the store service")
     case .remoteEmpty: print("The store service has no store yet. Run 'keyguard push' to seed it")
+    case .localAhead(let unpushed):
+        print("""
+        The local store holds \(unpushed.count) file(s) the store service has not received. \
+        Run 'keyguard push' to send them, or 'keyguard pull --discard-local' to drop them
+        """)
     case .pushed: break
     }
 }

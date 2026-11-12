@@ -15,9 +15,20 @@ func attempt<T>(_ body: () throws -> T) -> T {
         fail(describe(error))
     } catch let error as AgeError {
         fail(describe(error))
+    } catch let error as StoreDivergence {
+        fail(describe(error))
     } catch {
         fail("\(error)")
     }
+}
+
+func describe(_ error: StoreDivergence) -> String {
+    """
+    The local store holds \(error.unpushed.count) file(s) the store service does not hold, and the \
+    service has moved on to version \(error.serviceVersion). Neither side was changed. Any read, such as \
+    'keyguard list', names the secrets that exist only here: read the ones you need, run \
+    'keyguard pull --discard-local', then set them again.
+    """
 }
 
 func describe(_ error: StoreError) -> String {

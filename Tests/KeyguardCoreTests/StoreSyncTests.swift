@@ -170,6 +170,62 @@ struct StoreSyncTestRunner {
         check("should keep the reader's integrity clean after a delete pull",
               ((try? reader.integrity())?.isClean) ?? false)
 
+        print("\na pull keeps local changes the service never received")
+        let hub = FakeService(digest: rollingDigest)
+        let mac = seededStore(["A": "alpha"])
+        let macVersionURL = tempURL("version").appendingPathComponent("v")
+        let macSync = StoreSync(store: mac, remote: RemoteStore(transport: hub),
+                                digest: rollingDigest, versionURL: macVersionURL)
+        _ = try! macSync.push()
+        let macIndex = try! mac.put(name: "LOCAL_ONLY", value: "kept", tier: .high,
+                                    index: try! mac.loadIndex(identity: owner.secret))
+        let unsent = ["index.age", macIndex.entries["LOCAL_ONLY"]!.file].sorted()
+        checkEqual("should report an unsent secret while the service is unchanged",
+                   try? macSync.pull(), .localAhead(unpushed: unsent))
+        _ = try! RemoteStore(transport: hub)
+            .commit(files: ["vars/\(String(repeating: "b", count: 64)).age": Data("y".utf8)], deletes: [], ifMatch: 1)
+        checkEqual("should refuse to replace the store once the service has moved on",
+                   divergence { _ = try macSync.pull() }, StoreDivergence(unpushed: unsent, serviceVersion: 2))
+        checkEqual("should still decrypt the unsent secret after the refused pull",
+                   try? mac.values(of: ["LOCAL_ONLY"], index: macIndex, identity: owner.secret),
+                   ["LOCAL_ONLY": "kept"])
+        try? FileManager.default.removeItem(at: macVersionURL.appendingPathExtension("files"))
+        check("should refuse the same pull when no record of the last sync survives",
+              divergence { _ = try macSync.pull() } != nil)
+        try? Data("finder".utf8).write(to: mac.url(for: ".DS_Store"))
+        checkEqual("should not count a stray file as an unsent change",
+                   divergence { _ = try macSync.pull() }?.unpushed, unsent)
+        checkEqual("should take the service's copy when told to discard local changes",
+                   try? macSync.pull(discardingLocalChanges: true), .pulled(version: 2))
+        checkEqual("should drop the unsent secret on a discarding pull",
+                   Set((try? mac.loadIndex(identity: owner.secret))?.entries.keys ?? [:].keys), Set(["A"]))
+        checkEqual("should be in step with the service after a discarding pull", try? macSync.pull(), .upToDate)
+
+        print("\nan unsent change reaches the service on the next push")
+        let relay = FakeService(digest: rollingDigest)
+        let laptop = seededStore(["A": "alpha"])
+        let laptopSync = syncFor(laptop, relay)
+        _ = try! laptopSync.push()
+        _ = try! laptop.put(name: "LATE", value: "sent", tier: .high,
+                            index: try! laptop.loadIndex(identity: owner.secret))
+        checkEqual("should push the unsent secret", try? laptopSync.push(), .pushed(version: 2))
+        checkEqual("should be in step with the service after the push", try? laptopSync.pull(), .upToDate)
+        let second = newStore()
+        _ = try? syncFor(second, relay).pull()
+        checkEqual("should hand the late secret to another machine",
+                   (try? second.loadIndex(identity: owner.secret))
+                       .flatMap { try? second.values(of: ["LATE"], index: $0, identity: owner.secret) },
+                   ["LATE": "sent"])
+
+        print("\na store that never synced is not replaced by the service's")
+        let stranger = seededStore(["MINE": "local"])
+        check("should refuse to overwrite a never-synced store",
+              divergence { _ = try syncFor(stranger, relay).pull() } != nil)
+        checkEqual("should keep the never-synced store readable",
+                   (try? stranger.loadIndex(identity: owner.secret))
+                       .flatMap { try? stranger.values(of: ["MINE"], index: $0, identity: owner.secret) },
+                   ["MINE": "local"])
+
         for root in roots { try? FileManager.default.removeItem(at: root) }
 
         if failures > 0 { fputs("\n\(failures) failure(s)\n", stderr); exit(1) }
@@ -178,5 +234,9 @@ struct StoreSyncTestRunner {
 
     private static func throwsConflict(_ body: () throws -> Void) -> Bool {
         do { try body(); return false } catch RemoteStoreError.conflict { return true } catch { return false }
+    }
+
+    private static func divergence(_ body: () throws -> Void) -> StoreDivergence? {
+        do { try body(); return nil } catch let error as StoreDivergence { return error } catch { return nil }
     }
 }

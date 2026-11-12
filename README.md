@@ -374,7 +374,9 @@ The service only ever holds ciphertext: the same `index.age` and `vars/*.age` fi
 
 - **Reads** (`get`, `list`, `export`) pull first. One request compares versions; only a store that moved fetches the files that changed. An unreachable service falls back to the local cache.
 - **Writes** (`set`, `delete`, `mv`, `import`) push after the local write, under the version the cache was based on, so a store changed elsewhere becomes a conflict to re-run rather than a lost update. Offline, a write refuses instead of letting the cache drift ahead of the service.
+- **Unsent changes survive a pull.** keyguard records the files of its last sync in `remote-version.files`, beside `remote-version`. A change the service never received, such as a secret written while `KEYGUARD_STORE_URL` was unset, is never overwritten or deleted by a pull: a read warns and names the secrets, and the next write or `keyguard push` sends them. When the service has moved on in the meantime, keyguard changes neither side: reads use the local store, writes refuse, and `keyguard pull --discard-local` takes the service's copy once you have read the secrets that exist only locally.
 - `keyguard push` seeds the service from the local store or force-sends local changes; `keyguard pull` refreshes the cache. `init` and `migrate` seed a configured service automatically.
+- `make install` bakes `KEYGUARD_STORE_URL` into the launchd plist, so the HTTP server syncs every read and write too. Set it in your shell profile before `make install`; a server without it writes to the local store only.
 
 Seed a new service once, from the machine that already holds the store:
 

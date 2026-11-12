@@ -5,6 +5,12 @@ public enum SyncOutcome: Equatable, Sendable {
     case remoteEmpty
     case pulled(version: Int)
     case pushed(version: Int)
+    case localAhead(unpushed: [String])
+}
+
+public struct StoreDivergence: Error, Equatable {
+    public let unpushed: [String]
+    public let serviceVersion: Int
 }
 
 public struct StoreSync {
@@ -20,14 +26,21 @@ public struct StoreSync {
         self.versionURL = versionURL
     }
 
-    public func pull() throws -> SyncOutcome {
+    public func pull(discardingLocalChanges: Bool = false) throws -> SyncOutcome {
         let meta = try remote.meta()
-        if meta.version == syncedVersion { return .upToDate }
         if meta.version == 0 { return .remoteEmpty }
 
+        let unpushed = try discardingLocalChanges ? [] : unpushedPaths(service: meta)
+        if meta.version == syncedVersion, !discardingLocalChanges {
+            try remember(meta)
+            return unpushed.isEmpty ? .upToDate : .localAhead(unpushed: unpushed)
+        }
+        guard unpushed.isEmpty else {
+            throw StoreDivergence(unpushed: unpushed, serviceVersion: meta.version)
+        }
         try reconcile(to: meta)
         try store.rebuildMeta()
-        try writeSyncedVersion(meta.version)
+        try remember(meta)
         return .pulled(version: meta.version)
     }
 
@@ -37,19 +50,28 @@ public struct StoreSync {
         guard meta.version == base else { throw RemoteStoreError.conflict(current: meta.version) }
 
         let local = try store.remoteFiles()
-        var changed: [String: Data] = [:]
-        for (path, data) in local where meta.files[path] != hex(digest(data)) {
-            changed[path] = data
-        }
+        let hashes = local.mapValues { hex(digest($0)) }
+        let changed = local.filter { meta.files[$0.key] != hashes[$0.key] }
         let deletes = meta.files.keys.filter { local[$0] == nil }.sorted()
 
         if changed.isEmpty, deletes.isEmpty {
-            try writeSyncedVersion(meta.version)
+            try remember(meta)
             return .upToDate
         }
         let newVersion = try remote.commit(files: changed, deletes: deletes, ifMatch: meta.version)
-        try writeSyncedVersion(newVersion)
+        try remember(RemoteMeta(version: newVersion, files: hashes))
         return .pushed(version: newVersion)
+    }
+
+    private func unpushedPaths(service meta: RemoteMeta) throws -> [String] {
+        let synced = meta.version == syncedVersion ? meta.files : syncedFiles ?? meta.files
+        return try store.remoteFiles()
+            .filter { isWrittenByKeyguard($0.key) && synced[$0.key] != hex(digest($0.value)) }
+            .keys.sorted()
+    }
+
+    private func isWrittenByKeyguard(_ path: String) -> Bool {
+        path == storeIndexFile || (path.hasPrefix("\(storeVariableDirectory)/") && path.hasSuffix(".age"))
     }
 
     private func reconcile(to meta: RemoteMeta) throws {
@@ -77,9 +99,28 @@ public struct StoreSync {
         return value
     }
 
-    private func writeSyncedVersion(_ version: Int) throws {
+    private var syncedFilesURL: URL { versionURL.appendingPathExtension("files") }
+
+    private var syncedFiles: [String: String]? {
+        guard let data = try? Data(contentsOf: syncedFilesURL),
+              let state = try? JSONDecoder().decode(SyncedState.self, from: data),
+              state.version == syncedVersion else {
+            return nil
+        }
+        return state.files
+    }
+
+    private func remember(_ meta: RemoteMeta) throws {
+        if meta.version == syncedVersion, meta.files == syncedFiles { return }
         try FileManager.default.createDirectory(
             at: versionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try String(version).write(to: versionURL, atomically: true, encoding: .utf8)
+        try JSONEncoder().encode(SyncedState(version: meta.version, files: meta.files))
+            .write(to: syncedFilesURL, options: .atomic)
+        try String(meta.version).write(to: versionURL, atomically: true, encoding: .utf8)
     }
+}
+
+private struct SyncedState: Codable {
+    let version: Int
+    let files: [String: String]
 }
