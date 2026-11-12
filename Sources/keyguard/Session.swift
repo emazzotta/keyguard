@@ -53,7 +53,7 @@ struct Session {
     }
 
     func unlock(reason: String, requireService: Bool = false) throws -> (identity: String, index: StoreIndex) {
-        let unpushed = try refresh(requireService: requireService)
+        let pending = try refresh(requireService: requireService)
         guard store.exists else { throw KeyguardError.message(notInitialisedMessage) }
 
         authenticate(reason: reason)
@@ -65,12 +65,13 @@ struct Session {
             """)
         }
 
+        let unsent = try unsentPaths(after: pending, identity: identity, beforeWrite: requireService)
         let index = try store.loadIndex(identity: identity)
         let pinned = try loadPinned()
         try validateRecipients(pinned: pinned,
                                canonical: index.recipients,
                                highestSeenVersion: pinned.version)
-        nameLocalOnlySecrets(in: unpushed, index: index)
+        nameLocalOnlySecrets(in: unsent, index: index)
         return (identity, index)
     }
 
@@ -89,14 +90,18 @@ struct Session {
         }
     }
 
-    private func refresh(requireService: Bool) throws -> [String] {
-        guard let sync else { return [] }
+    private enum Pending {
+        case nothing
+        case unsent([String])
+        case diverged(StoreDivergence)
+    }
+
+    private func refresh(requireService: Bool) throws -> Pending {
+        guard let sync else { return .nothing }
         do {
             return try settle(sync.pull(), sync: sync, beforeWrite: requireService)
         } catch let error as StoreDivergence {
-            if requireService { throw KeyguardError.message(describe(error)) }
-            fputs("\(describe(error))\nReading the local store, which lacks the service's newer changes.\n", stderr)
-            return error.unpushed
+            return .diverged(error)
         } catch let error as RemoteStoreError {
             guard case .unreachable = error else {
                 throw KeyguardError.message("Store service error: \(error)")
@@ -106,11 +111,11 @@ struct Session {
                     "The store service is unreachable, so nothing was written. Try again on the tailnet.")
             }
             fputs("Store service unreachable; reading the local cache.\n", stderr)
-            return []
+            return .nothing
         }
     }
 
-    private func settle(_ outcome: SyncOutcome, sync: StoreSync, beforeWrite: Bool) throws -> [String] {
+    private func settle(_ outcome: SyncOutcome, sync: StoreSync, beforeWrite: Bool) throws -> Pending {
         switch outcome {
         case .remoteEmpty:
             fputs("The store service has no store yet; run 'keyguard push' to seed it.\n", stderr)
@@ -118,13 +123,48 @@ struct Session {
             guard beforeWrite, store.exists else {
                 fputs("The local store holds changes the store service has not received. "
                       + "Run 'keyguard push' to send them.\n", stderr)
-                return unpushed
+                return .unsent(unpushed)
             }
             _ = try sync.push()
         case .upToDate, .pulled, .pushed:
             break
         }
-        return []
+        return .nothing
+    }
+
+    private func unsentPaths(after pending: Pending, identity: String, beforeWrite: Bool) throws -> [String] {
+        switch pending {
+        case .nothing: return []
+        case .unsent(let paths): return paths
+        case .diverged(let divergence): return try merge(divergence, identity: identity, beforeWrite: beforeWrite)
+        }
+    }
+
+    private func merge(_ divergence: StoreDivergence, identity: String, beforeWrite: Bool) throws -> [String] {
+        guard let sync else { return [] }
+        do {
+            let unsent = try sync.rebase(identity: identity)
+            guard beforeWrite else {
+                fputs("Merged the local changes with version \(divergence.serviceVersion) of the store service. "
+                      + "Run 'keyguard push' to send them.\n", stderr)
+                return unsent
+            }
+            _ = try sync.push()
+            return []
+        } catch let error as RebaseRefusal {
+            return try keepApart(divergence, because: describe(error), beforeWrite: beforeWrite)
+        } catch let error as RemoteStoreError {
+            return try keepApart(divergence, because: "the store service did not cooperate (\(error)).",
+                                 beforeWrite: beforeWrite)
+        }
+    }
+
+    private func keepApart(_ divergence: StoreDivergence, because reason: String,
+                           beforeWrite: Bool) throws -> [String] {
+        let problem = describe(divergence, unmergedBecause: reason)
+        if beforeWrite { throw KeyguardError.message(problem) }
+        fputs("\(problem)\nReading the local store, which lacks the service's newer changes.\n", stderr)
+        return divergence.unpushed
     }
 
     private func nameLocalOnlySecrets(in unpushed: [String], index: StoreIndex) {

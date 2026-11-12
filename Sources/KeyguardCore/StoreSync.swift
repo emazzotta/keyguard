@@ -63,6 +63,40 @@ public struct StoreSync {
         return .pushed(version: newVersion)
     }
 
+    public func rebase(identity: String) throws -> [String] {
+        let meta = try remote.meta()
+        guard let base = syncedFiles else { throw RebaseRefusal.noSyncRecord }
+        let localIndex = try store.loadIndex(identity: identity)
+        let serviceIndex = try fetchIndex(in: meta, identity: identity)
+        guard localIndex.salt == serviceIndex.salt, localIndex.recipients == serviceIndex.recipients else {
+            throw RebaseRefusal.recipientsChanged
+        }
+        let local = try localHashes()
+        let plan = planRebase(base: base, local: local, service: meta.files,
+                              localEntries: localIndex.entries, serviceEntries: serviceIndex.entries)
+        guard plan.conflicts.isEmpty else { throw RebaseRefusal.changedOnBothSides(plan.conflicts) }
+
+        try apply(plan, from: meta)
+        try store.replaceIndex(with: StoreIndex(salt: serviceIndex.salt, recipients: serviceIndex.recipients,
+                                                entries: plan.entries))
+        try remember(meta)
+        return try unpushedPaths(service: meta)
+    }
+
+    private func fetchIndex(in meta: RemoteMeta, identity: String) throws -> StoreIndex {
+        let staged = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyguard-service-index-\(UUID().uuidString).age")
+        defer { try? FileManager.default.removeItem(at: staged) }
+        try fetchVerified(storeIndexFile, in: meta).write(to: staged, options: .atomic)
+        return try store.decodeIndex(at: staged, identity: identity)
+    }
+
+    private func apply(_ plan: RebasePlan, from meta: RemoteMeta) throws {
+        let fetched = try plan.fetch.map { ($0, try fetchVerified($0, in: meta)) }
+        for (path, data) in fetched { try place(data, at: path) }
+        for path in plan.remove { try? FileManager.default.removeItem(at: store.url(for: path)) }
+    }
+
     private func unpushedPaths(service meta: RemoteMeta) throws -> [String] {
         let synced = meta.version == syncedVersion ? meta.files : syncedFiles ?? meta.files
         return try store.remoteFiles()
@@ -74,21 +108,33 @@ public struct StoreSync {
         path == storeIndexFile || (path.hasPrefix("\(storeVariableDirectory)/") && path.hasSuffix(".age"))
     }
 
+    private func localHashes() throws -> [String: String] {
+        try store.remoteFiles().mapValues { hex(digest($0)) }
+    }
+
     private func reconcile(to meta: RemoteMeta) throws {
-        let local = try store.remoteFiles()
-        for (path, remoteHash) in meta.files where hex(digest(local[path] ?? Data())) != remoteHash {
-            let data = try remote.fetch(path)
-            guard hex(digest(data)) == remoteHash else {
-                throw RemoteStoreError.malformedResponse("hash mismatch for \(path)")
-            }
-            let destination = store.url(for: path)
-            try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: destination, options: .atomic)
+        let local = try localHashes()
+        for (path, remoteHash) in meta.files where local[path] != remoteHash {
+            try place(try fetchVerified(path, in: meta), at: path)
         }
         for path in local.keys where meta.files[path] == nil {
             try? FileManager.default.removeItem(at: store.url(for: path))
         }
+    }
+
+    private func fetchVerified(_ path: String, in meta: RemoteMeta) throws -> Data {
+        let data = try remote.fetch(path)
+        guard hex(digest(data)) == meta.files[path] else {
+            throw RemoteStoreError.malformedResponse("hash mismatch for \(path)")
+        }
+        return data
+    }
+
+    private func place(_ data: Data, at path: String) throws {
+        let destination = store.url(for: path)
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: destination, options: .atomic)
     }
 
     private var syncedVersion: Int {

@@ -25,10 +25,30 @@ func attempt<T>(_ body: () throws -> T) -> T {
 func describe(_ error: StoreDivergence) -> String {
     """
     The local store holds \(error.unpushed.count) file(s) the store service does not hold, and the \
-    service has moved on to version \(error.serviceVersion). Neither side was changed. Any read, such as \
-    'keyguard list', names the secrets that exist only here: read the ones you need, run \
-    'keyguard pull --discard-local', then set them again.
+    service has moved on to version \(error.serviceVersion). Neither side was changed. A command that \
+    unlocks the store, such as 'keyguard list', merges the two; 'keyguard pull --discard-local' drops \
+    the local changes.
     """
+}
+
+func describe(_ error: StoreDivergence, unmergedBecause reason: String) -> String {
+    """
+    The local store holds \(error.unpushed.count) file(s) the store service does not hold, and the \
+    service has moved on to version \(error.serviceVersion). keyguard did not merge them: \(reason) \
+    Neither side was changed. Any read, such as 'keyguard list', names the secrets that exist only \
+    here: read the ones you need, run 'keyguard pull --discard-local', then set them again.
+    """
+}
+
+func describe(_ error: RebaseRefusal) -> String {
+    switch error {
+    case .noSyncRecord:
+        return "this machine has no record of its last sync."
+    case .recipientsChanged:
+        return "the recipient set differs between the two."
+    case .changedOnBothSides(let names):
+        return "\(names.joined(separator: ", ")) changed here and on the service."
+    }
 }
 
 func describe(_ error: StoreError) -> String {

@@ -129,6 +129,13 @@ service_meta_field() {
         | python3 -c "import sys, json; d = json.load(sys.stdin); print($2)"
 }
 
+commit_from_another_device() {
+    local url="$1" version="$2" letter="$3"
+    curl -s -o /dev/null -X POST -H "Tailscale-User-Login: tester" -H "If-Match: $version" \
+        -d "{\"files\": {\"vars/$(printf '%64s' '' | tr ' ' "$letter").age\": \"eA==\"}, \"delete\": []}" \
+        "$url/store/commit"
+}
+
 remote_sync_tests() {
     local keyguard="$1"
     local server_py port url ready
@@ -182,22 +189,27 @@ WEIRD" "$("$keyguard" list)"
     printf 'local-value' | KEYGUARD_STORE_URL="" "$keyguard" set LOCAL_ONLY >/dev/null 2>&1
     assert_contains "should name a secret the service never received" \
         "$("$keyguard" get JIRA_TOKEN 2>&1 >/dev/null)" "Only in the local store: LOCAL_ONLY"
-    curl -s -o /dev/null -X POST -H "Tailscale-User-Login: tester" -H "If-Match: 2" \
-        -d "{\"files\": {\"vars/$(printf 'b%.0s' $(seq 1 64)).age\": \"eA==\"}, \"delete\": []}" "$url/store/commit"
+    commit_from_another_device "$url" 2 b
     assert_equals "should let another device move the service on" "3" "$(service_meta_field "$url" 'd["version"]')"
     assert_equals "should keep an unsent secret once the service has moved on" \
         "local-value" "$("$keyguard" get LOCAL_ONLY 2>/dev/null)"
-    assert_equals "should refuse a write while unsent changes face a newer service" \
-        "1" "$(printf x | "$keyguard" set BLOCKED_KEY >/dev/null 2>&1; echo $?)"
-    assert_contains "should take the service's copy when told to discard local changes" \
-        "$("$keyguard" pull --discard-local 2>&1)" "version 3"
-    assert_contains "should no longer hold the discarded secret" \
-        "$("$keyguard" get LOCAL_ONLY 2>&1)" "Keys not found: LOCAL_ONLY"
+    assert_equals "should not let a read change the service" "3" "$(service_meta_field "$url" 'd["version"]')"
+    printf 'next-value' | "$keyguard" set NEXT_KEY >/dev/null 2>&1
+    assert_equals "should send the merged secret ahead of the next write" \
+        "5" "$(service_meta_field "$url" 'd["version"]')"
 
     printf 'late-value' | KEYGUARD_STORE_URL="" "$keyguard" set LATE_KEY >/dev/null 2>&1
-    printf 'next-value' | "$keyguard" set NEXT_KEY >/dev/null 2>&1
-    assert_equals "should send an unsent secret ahead of the next write" \
-        "5" "$(service_meta_field "$url" 'd["version"]')"
+    commit_from_another_device "$url" 5 c
+    printf 'after-value' | "$keyguard" set AFTER_KEY >/dev/null 2>&1
+    assert_equals "should merge unsent changes into a newer service before a write" \
+        "8" "$(service_meta_field "$url" 'd["version"]')"
+    assert_equals "should still hold the secret merged before the write" "late-value" "$("$keyguard" get LATE_KEY)"
+
+    printf 'gone-value' | KEYGUARD_STORE_URL="" "$keyguard" set GONE_KEY >/dev/null 2>&1
+    assert_contains "should take the service's copy when told to discard local changes" \
+        "$("$keyguard" pull --discard-local 2>&1)" "version 8"
+    assert_contains "should no longer hold the discarded secret" \
+        "$("$keyguard" get GONE_KEY 2>&1)" "Keys not found: GONE_KEY"
 
     kill "$service_pid" 2>/dev/null
     wait "$service_pid" 2>/dev/null

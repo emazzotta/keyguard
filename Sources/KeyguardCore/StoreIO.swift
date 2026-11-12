@@ -26,7 +26,11 @@ public struct Store {
     }
 
     public func loadIndex(identity: String) throws -> StoreIndex {
-        let plaintext = try Padding.unpad(try runner.decrypt(at: indexURL.path, identity: identity))
+        try decodeIndex(at: indexURL, identity: identity)
+    }
+
+    public func decodeIndex(at url: URL, identity: String) throws -> StoreIndex {
+        let plaintext = try Padding.unpad(try runner.decrypt(at: url.path, identity: identity))
         let index = try storeDecoder().decode(StoreIndex.self, from: plaintext)
         guard index.version == StoreIndex.currentVersion else {
             throw StoreError.unsupportedStoreVersion(index.version)
@@ -131,6 +135,11 @@ public struct Store {
         try writeIndex(updated, recipients: recipients)
         try rebuildMeta()
         return updated
+    }
+
+    public func replaceIndex(with index: StoreIndex) throws {
+        try writeIndex(index, recipients: index.recipients)
+        try rebuildMeta()
     }
 
     private func resealVariables(to recipients: RecipientSet, from index: StoreIndex,

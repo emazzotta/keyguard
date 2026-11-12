@@ -225,6 +225,68 @@ struct StoreSyncTestRunner {
                    (try? stranger.loadIndex(identity: owner.secret))
                        .flatMap { try? stranger.values(of: ["MINE"], index: $0, identity: owner.secret) },
                    ["MINE": "local"])
+        checkEqual("should refuse to rebase without a record of the last sync",
+                   refusal { _ = try syncFor(stranger, relay).rebase(identity: owner.secret) }, .noSyncRecord)
+
+        print("\nunsent changes are rebased onto a service that moved on")
+        let cloud = FakeService(digest: rollingDigest)
+        let desk = seededStore(["A": "alpha"])
+        let deskSync = syncFor(desk, cloud)
+        _ = try! deskSync.push()
+        let phone = newStore()
+        let phoneSync = syncFor(phone, cloud)
+        _ = try! phoneSync.pull()
+        _ = try! phone.put(name: "FROM_PHONE", value: "p", tier: .high,
+                           index: try! phone.loadIndex(identity: owner.secret))
+        _ = try! phoneSync.push()
+        _ = try! desk.put(name: "FROM_DESK", value: "d", tier: .high,
+                          index: try! desk.loadIndex(identity: owner.secret))
+        check("should refuse a plain pull before the rebase", divergence { _ = try deskSync.pull() } != nil)
+        checkEqual("should leave only the desk's own index and secret unsent after the rebase",
+                   (try? deskSync.rebase(identity: owner.secret)).map { $0.count }, 2)
+        checkEqual("should hold both sides' secrets after the rebase",
+                   (try? desk.loadIndex(identity: owner.secret)).flatMap {
+                       try? desk.values(of: ["A", "FROM_DESK", "FROM_PHONE"], index: $0, identity: owner.secret)
+                   },
+                   ["A": "alpha", "FROM_DESK": "d", "FROM_PHONE": "p"])
+        check("should keep the integrity manifest clean after the rebase", ((try? desk.integrity())?.isClean) ?? false)
+        checkEqual("should push the rebased store as the next version", try? deskSync.push(), .pushed(version: 3))
+        _ = try? phoneSync.pull()
+        checkEqual("should hand the merged store to the other device",
+                   Set((try? phone.loadIndex(identity: owner.secret))?.entries.keys ?? [:].keys),
+                   Set(["A", "FROM_DESK", "FROM_PHONE"]))
+
+        print("\na secret changed on both sides is not merged")
+        _ = try! desk.put(name: "A", value: "desk-edit", tier: .high,
+                          index: try! desk.loadIndex(identity: owner.secret))
+        _ = try! phone.put(name: "A", value: "phone-edit", tier: .high,
+                           index: try! phone.loadIndex(identity: owner.secret))
+        _ = try! phoneSync.push()
+        checkEqual("should name the secret both sides changed",
+                   refusal { _ = try deskSync.rebase(identity: owner.secret) }, .changedOnBothSides(["A"]))
+        checkEqual("should leave the desk's edit in place after the refusal",
+                   (try? desk.loadIndex(identity: owner.secret)).flatMap {
+                       try? desk.values(of: ["A"], index: $0, identity: owner.secret)
+                   },
+                   ["A": "desk-edit"])
+
+        print("\na secret deleted here stays deleted through a rebase")
+        let vault = FakeService(digest: rollingDigest)
+        let first = seededStore(["KEEP": "k", "DROP": "x"])
+        let firstSync = syncFor(first, vault)
+        _ = try! firstSync.push()
+        let peer = newStore()
+        let peerSync = syncFor(peer, vault)
+        _ = try! peerSync.pull()
+        _ = try! peer.put(name: "NEW", value: "n", tier: .high, index: try! peer.loadIndex(identity: owner.secret))
+        _ = try! peerSync.push()
+        _ = try! first.remove(name: "DROP", index: try! first.loadIndex(identity: owner.secret))
+        _ = try? firstSync.rebase(identity: owner.secret)
+        checkEqual("should push the deletion on top of the other side's addition",
+                   try? firstSync.push(), .pushed(version: 3))
+        _ = try? peerSync.pull()
+        checkEqual("should leave the other device without the deleted secret and with its own addition",
+                   Set((try? peer.loadIndex(identity: owner.secret))?.entries.keys ?? [:].keys), Set(["KEEP", "NEW"]))
 
         for root in roots { try? FileManager.default.removeItem(at: root) }
 
@@ -238,5 +300,9 @@ struct StoreSyncTestRunner {
 
     private static func divergence(_ body: () throws -> Void) -> StoreDivergence? {
         do { try body(); return nil } catch let error as StoreDivergence { return error } catch { return nil }
+    }
+
+    private static func refusal(_ body: () throws -> Void) -> RebaseRefusal? {
+        do { try body(); return nil } catch let error as RebaseRefusal { return error } catch { return nil }
     }
 }
