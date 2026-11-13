@@ -43,6 +43,12 @@ machine, and canonically inside `index.age` - and compared on every operation.
 They diverging is the one failure that would otherwise be silent and total, so
 it hard-fails rather than picking a winner.
 
+## Other systems: keyguard-passkey
+
+keyguard needs macOS and Touch ID. [keyguard-passkey](https://github.com/emazzotta/keyguard-passkey) is the portable client for Windows, macOS and Linux: one Python command and a browser, and a passkey (Windows Hello, Touch ID or a phone) approves each read. It writes the same store layout.
+
+That repository also holds the [provider contract](https://github.com/emazzotta/keyguard-passkey/blob/main/docs/provider.md): the commands, the output and the exit codes that a script can rely on when it asks keyguard, keyguard-passkey or another secret manager for a secret.
+
 ## Requirements
 
 - macOS with Touch ID
