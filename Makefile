@@ -8,7 +8,7 @@ SECRETS_FILE       ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.en
 STORE_URL          ?= $(KEYGUARD_STORE_URL)
 BRIDGE_CONFIG_FILE ?= $(or $(KEYGUARD_BRIDGE_CONFIG_FILE),$(HOME)/.mac-bridge-endpoints.yaml)
 LOG_FILE           ?= $(or $(KEYGUARD_LOG_FILE),$(HOME)/.keyguard/access.log)
-UNLOCK_CLIENT_SRC  ?= $(or $(KEYGUARD_UNLOCK_CLIENT_SRC),$(HOME)/Projects/private/personal-infra/apps/devbox/unlock)
+PHONE_CLIENT_PYZ   ?= $(or $(KEYGUARD_PHONE_CLIENT_PYZ),$(HOME)/Projects/private/personal-infra/apps/devbox/unlock/keyguard-passkey.pyz)
 PHONE_SIGNING_KEY  ?= $(or $(KEYGUARD_PHONE_SIGNING_KEY),$(HOME)/.keyguard/mac-sign.key)
 
 CORE_SOURCES      := $(wildcard Sources/KeyguardCore/*.swift)
@@ -80,15 +80,16 @@ install: build ## Install binary, server, and register launchd agent
 	sudo install -m 755 bin/keyguard "$(BINARY)"
 	sudo install -m 755 src/keyguard-server.py "$(SERVER)"
 	sudo install -m 644 src/keyguard_server/*.py "$(SERVER_DIR)/keyguard_server/"
-	@if [ -f "$(UNLOCK_CLIENT_SRC)/unlock.py" ]; then \
+	@if [ -f "$(PHONE_CLIENT_PYZ)" ]; then \
 		sudo install -d "$(UNLOCK_DIR)" && \
-		sudo install -m 755 "$(UNLOCK_CLIENT_SRC)/unlock.py" "$(UNLOCK_CLIENT_SRC)/pending.py" "$(UNLOCK_DIR)/" && \
-		sudo install -m 644 "$(UNLOCK_CLIENT_SRC)/unlock_client.py" "$(UNLOCK_CLIENT_SRC)/hold.py" "$(UNLOCK_DIR)/"; \
+		sudo install -m 755 "$(PHONE_CLIENT_PYZ)" "$(UNLOCK_DIR)/keyguard-passkey.pyz" && \
+		sudo install -m 755 src/pending.py "$(UNLOCK_DIR)/pending.py" && \
+		sudo rm -f "$(UNLOCK_DIR)/unlock.py" "$(UNLOCK_DIR)/unlock_client.py" "$(UNLOCK_DIR)/hold.py"; \
 	else \
-		echo "No unlock client in $(UNLOCK_CLIENT_SRC): reads stay Touch ID only."; \
+		echo "No keyguard-passkey client at $(PHONE_CLIENT_PYZ): reads stay Touch ID only."; \
 	fi
 	mkdir -p "$(LAUNCH_AGENTS)" "$(LOGS_DIR)"
-	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__STORE_URL__|$(STORE_URL)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g; s|__LOG_FILE__|$(LOG_FILE)|g; s|__PHONE_CLIENT__|$(UNLOCK_DIR)/unlock.py|g; s|__PHONE_SIGNING_KEY__|$(PHONE_SIGNING_KEY)|g' \
+	sed 's|__PREFIX__|$(PREFIX)|g; s|__HOME__|$(HOME)|g; s|__SECRETS_FILE__|$(SECRETS_FILE)|g; s|__STORE_URL__|$(STORE_URL)|g; s|__BRIDGE_CONFIG_FILE__|$(BRIDGE_CONFIG_FILE)|g; s|__LOG_FILE__|$(LOG_FILE)|g; s|__PHONE_CLIENT__|$(UNLOCK_DIR)/keyguard-passkey.pyz|g; s|__PHONE_SIGNING_KEY__|$(PHONE_SIGNING_KEY)|g' \
 		com.keyguard.server.plist > "$(PLIST)"
 	@echo "Installed. Run 'make start' to start the server."
 

@@ -1,7 +1,7 @@
 """The phone fallback for a secret read, raced against the Touch ID prompt.
 
-Touch ID shows at once. Unless someone answers it within `Timing.delay`, the unlock client that
-`make install` copies from personal-infra (apps/devbox/unlock) also asks the unlock service, where the
+Touch ID shows at once. Unless someone answers it within `Timing.delay`, the keyguard-passkey client that
+`make install` copies also asks the unlock service behind the store (KEYGUARD_STORE_URL), where the
 web terminal and the phone can approve the read. The first answer wins and the other side is stopped;
 the client withdraws its request on SIGTERM. A Touch ID cancel is a no and ends the read, while a
 failing client never ends a prompt someone may still answer.
@@ -23,8 +23,9 @@ from .caller import Caller
 from .config import (
     PHONE_CLIENT,
     PHONE_DELAY,
-    PHONE_HOST,
     PHONE_PATH,
+    PHONE_REQUESTER,
+    PHONE_SERVICE,
     PHONE_SIGNING_KEY,
     PHONE_STOP_GRACE,
     PHONE_WAIT,
@@ -34,6 +35,9 @@ from .keyguard_cli import CliResult
 
 _EXPORT = "export"
 _PANE_ENV = "TMUX_PANE"
+_SESSION_ENV = "KEYGUARD_SESSION"
+_TITLE_ENV = "KEYGUARD_TITLE"
+_HOLD_ENV = "KEYGUARD_PASSKEY_HOLD_SECONDS"
 
 
 class Side(Enum):
@@ -56,28 +60,29 @@ DEFAULT_TIMING = Timing()
 class PhoneClient:
     client: Path
     signing_key: Path
+    service: str
 
-    def argv(self, keys: list[str], caller: Caller) -> list[str]:
-        """An empty session and title stop the client from guessing a caller of its own."""
-        return [str(self.client), "--host", PHONE_HOST, "--signing-key", str(self.signing_key),
-                "--hold-seconds", "0", "--session", caller.session or "", "--title", caller.title or "",
-                "--", *keys]
+    def argv(self, keys: list[str]) -> list[str]:
+        return [str(self.client), "--service", self.service, "--requester", PHONE_REQUESTER,
+                "--signing-key", str(self.signing_key), "get", "--format", "shell", "--", *keys]
 
 
-def configured(client: Path | None = PHONE_CLIENT, signing_key: Path | None = PHONE_SIGNING_KEY) -> PhoneClient | None:
-    if client is None or signing_key is None:
+def configured(client: Path | None = PHONE_CLIENT, signing_key: Path | None = PHONE_SIGNING_KEY,
+               service: str = PHONE_SERVICE) -> PhoneClient | None:
+    if client is None or signing_key is None or not service:
         return None
     if not (client.is_file() and signing_key.is_file()):
         _log(f"phone fallback off: {client} or {signing_key} is missing")
         return None
-    return PhoneClient(client, signing_key)
+    return PhoneClient(client, signing_key, service)
 
 
-def client_env(pane: str | None = None) -> dict[str, str]:
-    """launchd hands the server a bare environment; the client needs Homebrew's age and openssl@3, and
-    records the asking pane from TMUX_PANE, as it does when it runs in that pane."""
-    env = {"HOME": str(Path.home()), "PATH": PHONE_PATH, "PYTHONIOENCODING": "utf-8", "LANG": "en_US.UTF-8"}
-    return env if pane is None else {**env, _PANE_ENV: pane}
+def client_env(caller: Caller) -> dict[str, str]:
+    """launchd hands the server a bare environment; the client needs Homebrew's age and openssl@3, starts no
+    hold agent, and records the asking session, title and pane (TMUX_PANE, as when it runs in that pane)."""
+    env = {"HOME": str(Path.home()), "PATH": PHONE_PATH, "PYTHONIOENCODING": "utf-8", "LANG": "en_US.UTF-8",
+           _HOLD_ENV: "0", _SESSION_ENV: caller.session or "", _TITLE_ENV: caller.title or ""}
+    return env if caller.pane is None else {**env, _PANE_ENV: caller.pane}
 
 
 def parse_exports(stdout: str, keys: list[str]) -> dict[str, str] | None:
@@ -222,8 +227,8 @@ class _Race:
                          timed_out=touch_id.timed_out)
 
     def _ask_phone(self) -> None:
-        argv = self._client.argv(self._keys, self._caller)
-        self._phone = _Child(Side.PHONE, argv, client_env(self._caller.pane), self._exits, self._timing.deadline)
+        argv = self._client.argv(self._keys)
+        self._phone = _Child(Side.PHONE, argv, client_env(self._caller), self._exits, self._timing.deadline)
 
     def _stop_in_background(self, child: _Child) -> None:
         """Answers the caller at once; the client then has its grace to withdraw its request."""

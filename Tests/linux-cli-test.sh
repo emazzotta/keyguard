@@ -131,25 +131,25 @@ service_meta_field() {
 
 commit_from_another_device() {
     local url="$1" version="$2" letter="$3"
-    curl -s -o /dev/null -X POST -H "Tailscale-User-Login: tester" -H "If-Match: $version" \
+    curl -s -o /dev/null -X POST -H "Tailscale-User-Login: tester" -H "If-Match: $version" -H "Content-Type: application/json" \
         -d "{\"files\": {\"vars/$(printf '%64s' '' | tr ' ' "$letter").age\": \"eA==\"}, \"delete\": []}" \
         "$url/store/commit"
 }
 
 remote_sync_tests() {
     local keyguard="$1"
-    local server_py port url ready
-    server_py="${KEYGUARD_STORE_SERVER:-$REPO_ROOT/../personal-infra/apps/unlock/server/store_server.py}"
+    local client_pyz port url ready
+    client_pyz="${KEYGUARD_PASSKEY_PYZ:-$REPO_ROOT/../personal-infra/apps/devbox/unlock/keyguard-passkey.pyz}"
 
-    if [ ! -f "$server_py" ]; then
-        echo "  - store_server.py not found, skipping ($server_py)"
+    if [ ! -f "$client_pyz" ]; then
+        echo "  - keyguard-passkey.pyz not found, skipping ($client_pyz)"
         return 0
     fi
 
     mkdir -p "$work/service"
     port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
     url="http://127.0.0.1:$port"
-    STORE_ROOT="$work/service" STORE_PORT="$port" python3 "$server_py" >/dev/null 2>&1 &
+    KEYGUARD_PASSKEY_STORE="$work/service" KEYGUARD_PASSKEY_PORT="$port" python3 "$client_pyz" serve >/dev/null 2>&1 &
     service_pid=$!
 
     export KEYGUARD_STORE_URL="$url"

@@ -31,10 +31,11 @@ def _path_from_env(name: str) -> Path | None:
     return Path(value).expanduser() if value else None
 
 
-# The phone fallback (phone.py): off unless both files exist.
+# The phone fallback (phone.py): off unless the store service is set and both files exist.
 PHONE_CLIENT: Final = _path_from_env("KEYGUARD_PHONE_CLIENT")
 PHONE_SIGNING_KEY: Final = _path_from_env("KEYGUARD_PHONE_SIGNING_KEY")
-PHONE_HOST: Final = "mac"
+PHONE_SERVICE: Final = os.environ.get("KEYGUARD_STORE_URL", "")
+PHONE_REQUESTER: Final = "mac"
 PHONE_DELAY: Final = 15
 # The client's 10 s request plus its 300 s wait for an answer, with a margin.
 PHONE_WAIT: Final = 330

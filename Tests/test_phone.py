@@ -15,6 +15,7 @@ FAST = phone.Timing(delay=0.3, deadline=5.0, touch_id_timeout=5.0, stop_grace=2.
 NOBODY = Caller()
 WAIT_FOR_SIGNAL = "sleep 30 & wait"
 EXPORTS_A_B = "printf \"export A='1'\\nexport B='two words'\\n\""
+SERVICE = "https://unlock.example.ts.net"
 
 
 def script(path: Path, body: str) -> Path:
@@ -47,7 +48,8 @@ def touch_id(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(tmp_path):
     def install(body: str) -> phone.PhoneClient:
-        return phone.PhoneClient(client=script(tmp_path / "unlock.py", body), signing_key=tmp_path / "mac-sign.key")
+        return phone.PhoneClient(client=script(tmp_path / "keyguard-passkey.pyz", body),
+                                 signing_key=tmp_path / "mac-sign.key", service=SERVICE)
     return install
 
 
@@ -153,7 +155,8 @@ def test_should_give_up_when_neither_side_answers_by_the_deadline(touch_id, clie
 
 def test_should_keep_waiting_on_touch_id_when_the_phone_client_cannot_start(touch_id, tmp_path):
     touch_id("sleep 0.6; printf secret")
-    missing = phone.PhoneClient(client=tmp_path / "no-such-unlock.py", signing_key=tmp_path / "mac-sign.key")
+    missing = phone.PhoneClient(client=tmp_path / "no-such-client.pyz", signing_key=tmp_path / "mac-sign.key",
+                                service=SERVICE)
 
     result = phone.race(["A"], NOBODY, missing, timing=FAST)
 
@@ -163,33 +166,34 @@ def test_should_keep_waiting_on_touch_id_when_the_phone_client_cannot_start(touc
 # ---- The client's command line and answer ----
 
 
-def test_should_ask_as_the_mac_with_the_caller_and_the_names_after_a_double_dash(tmp_path):
-    asking = phone.PhoneClient(client=tmp_path / "unlock.py", signing_key=tmp_path / "mac-sign.key")
+def test_should_ask_the_store_service_as_the_mac_for_shell_exports_with_the_names_after_a_double_dash(tmp_path):
+    asking = phone.PhoneClient(client=tmp_path / "keyguard-passkey.pyz", signing_key=tmp_path / "mac-sign.key",
+                               service=SERVICE)
 
-    argv = asking.argv(["A", "-B"], Caller(session="48f92bcb", title="Fix the build"))
+    argv = asking.argv(["A", "-B"])
 
-    assert argv == [str(tmp_path / "unlock.py"), "--host", "mac", "--signing-key", str(tmp_path / "mac-sign.key"),
-                    "--hold-seconds", "0", "--session", "48f92bcb", "--title", "Fix the build", "--", "A", "-B"]
-
-
-def test_should_pass_an_empty_caller_so_the_client_never_guesses_one(tmp_path):
-    asking = phone.PhoneClient(client=tmp_path / "unlock.py", signing_key=tmp_path / "mac-sign.key")
-
-    argv = asking.argv(["A"], NOBODY)
-
-    assert argv[argv.index("--session") + 1] == "" and argv[argv.index("--title") + 1] == ""
+    assert argv == [str(tmp_path / "keyguard-passkey.pyz"), "--service", SERVICE, "--requester", "mac",
+                    "--signing-key", str(tmp_path / "mac-sign.key"), "get", "--format", "shell", "--", "A", "-B"]
 
 
-def test_should_name_the_asking_pane_to_the_client_as_tmux_would():
-    assert phone.client_env("%6")["TMUX_PANE"] == "%6"
+def test_should_name_the_asking_session_title_and_pane_to_the_client():
+    env = phone.client_env(Caller(session="48f92bcb", title="Fix the build", pane="%6"))
+
+    assert (env["KEYGUARD_SESSION"], env["KEYGUARD_TITLE"], env["TMUX_PANE"]) == ("48f92bcb", "Fix the build", "%6")
 
 
-def test_should_name_no_pane_to_the_client_when_the_caller_reports_none():
-    assert "TMUX_PANE" not in phone.client_env()
+def test_should_pass_an_empty_session_and_title_and_no_pane_when_the_caller_reports_none():
+    env = phone.client_env(NOBODY)
+
+    assert (env["KEYGUARD_SESSION"], env["KEYGUARD_TITLE"], "TMUX_PANE" in env) == ("", "", False)
+
+
+def test_should_keep_the_client_from_holding_a_value_after_the_read():
+    assert phone.client_env(NOBODY)["KEYGUARD_PASSKEY_HOLD_SECONDS"] == "0"
 
 
 def test_should_find_openssl_3_before_any_other_openssl():
-    assert phone.client_env()["PATH"].split(":")[0] == "/opt/homebrew/opt/openssl@3/bin"
+    assert phone.client_env(NOBODY)["PATH"].split(":")[0] == "/opt/homebrew/opt/openssl@3/bin"
 
 
 def test_should_read_the_values_from_the_client_exports():
@@ -214,21 +218,23 @@ def test_should_refuse_an_answer_that_does_not_name_exactly_the_keys(stdout):
 # ---- Configuration ----
 
 
-def test_should_stay_off_without_a_client_or_a_signing_key(tmp_path):
-    key = script(tmp_path / "mac-sign.key", "")
+def test_should_stay_off_without_a_client_a_signing_key_or_a_store_service(tmp_path):
+    asking, key = script(tmp_path / "keyguard-passkey.pyz", ""), script(tmp_path / "mac-sign.key", "")
 
-    assert phone.configured(None, key) is None
-    assert phone.configured(tmp_path / "unlock.py", None) is None
+    assert phone.configured(None, key, SERVICE) is None
+    assert phone.configured(asking, None, SERVICE) is None
+    assert phone.configured(asking, key, "") is None
 
 
 def test_should_stay_off_while_the_client_or_the_key_is_missing(tmp_path):
-    assert phone.configured(tmp_path / "unlock.py", tmp_path / "mac-sign.key") is None
+    assert phone.configured(tmp_path / "keyguard-passkey.pyz", tmp_path / "mac-sign.key", SERVICE) is None
 
 
-def test_should_turn_on_once_the_client_and_the_key_are_installed(tmp_path):
-    asking, key = script(tmp_path / "unlock.py", ""), script(tmp_path / "mac-sign.key", "")
+def test_should_turn_on_once_the_client_and_the_key_are_installed_and_the_store_service_is_set(tmp_path):
+    asking, key = script(tmp_path / "keyguard-passkey.pyz", ""), script(tmp_path / "mac-sign.key", "")
 
-    assert phone.configured(asking, key) == phone.PhoneClient(client=asking, signing_key=key)
+    assert phone.configured(asking, key, SERVICE) == phone.PhoneClient(client=asking, signing_key=key,
+                                                                       service=SERVICE)
 
 
 # ---- The handler ----
@@ -236,7 +242,8 @@ def test_should_turn_on_once_the_client_and_the_key_are_installed(tmp_path):
 
 @pytest.mark.parametrize("path", ["/A,B", "/A,B?timeout=60"])
 def test_should_race_the_phone_on_every_read_once_configured(server, monkeypatch, tmp_path, path):
-    asking = phone.PhoneClient(client=tmp_path / "unlock.py", signing_key=tmp_path / "mac-sign.key")
+    asking = phone.PhoneClient(client=tmp_path / "keyguard-passkey.pyz", signing_key=tmp_path / "mac-sign.key",
+                               service=SERVICE)
     seen = {}
     monkeypatch.setattr(phone, "configured", lambda: asking)
 
