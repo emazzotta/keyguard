@@ -1,0 +1,45 @@
+{
+ "_provenance": "Regenerate the requests with tools/make_test_vectors.py. The store is a keyguard store of test values; remote_identity is a throwaway age identity among its recipients. Each request is signed by a throwaway Ed25519 key that this client's request builder used, so a change in its serialisation shows here.",
+ "caller_request": {
+  "canonical_signed_bytes_b64": "eyJlcGhfcHVia2V5IjoiYWdlMWxwamp0cTQ2Njh3ODcweGRyZ3htNmVhNGM1azV4M3dkdWEwd3I3OHAyYXQzams3aHBjdnM5ampwOWsiLCJob3N0IjoiZGV2Ym94Iiwic2Vzc2lvbiI6IjQ4ZjkyYmNiIiwidGl0bGUiOiJSZWNobnVuZ3N0YWcgZsO8ciBkZW4gS3VuZGVuIOKAkyBFbnR3dXJmIiwidHMiOjE3MDAwMDAwMDAsInZhcnMiOlsiSklSQV9UT0tFTiIsIkdJVEhVQl9UT0tFTiJdfQ==",
+  "request": {
+   "eph_pubkey": "age1lpjjtq4668w870xdrgxm6ea4c5k5x3wdua0wr78p2at3jk7hpcvs9jjp9k",
+   "host": "devbox",
+   "session": "48f92bcb",
+   "sig": "0Wxi1FDZw5pgBVwA4bT+hhaQTteNlMKr0C8/FlILIkJhgTyPs+yU/6/HHpVdo6w2K9UbqDsyeqaorDOPMdHNDQ==",
+   "title": "Rechnungstag f\u00fcr den Kunden \u2013 Entwurf",
+   "ts": 1700000000,
+   "vars": [
+    "JIRA_TOKEN",
+    "GITHUB_TOKEN"
+   ]
+  },
+  "requester_pubkey_b64": "/uQAHaFBBDdENEkpn+99L2cORluSrCIXkaLUvFeQiU0="
+ },
+ "expected": {
+  "GITHUB_TOKEN": "gh-value",
+  "JIRA_TOKEN": "jira-value",
+  "MULTILINE": "-----BEGIN-----\nline2\n-----END-----"
+ },
+ "plain_request": {
+  "canonical_signed_bytes_b64": "eyJlcGhfcHVia2V5IjoiYWdlMWxwamp0cTQ2Njh3ODcweGRyZ3htNmVhNGM1azV4M3dkdWEwd3I3OHAyYXQzams3aHBjdnM5ampwOWsiLCJob3N0IjoiZGV2Ym94IiwidHMiOjE3MDAwMDAwMDAsInZhcnMiOlsiSklSQV9UT0tFTiIsIkdJVEhVQl9UT0tFTiJdfQ==",
+  "request": {
+   "eph_pubkey": "age1lpjjtq4668w870xdrgxm6ea4c5k5x3wdua0wr78p2at3jk7hpcvs9jjp9k",
+   "host": "devbox",
+   "sig": "FejnKamcIBNCd4Bjs5t3MhHKGLpT8rwsXxQMB1ShBgQ3yXfZ1n0LSuX/a1lW/umoZUSG9yetNlMpepOQ4+2SAA==",
+   "ts": 1700000000,
+   "vars": [
+    "JIRA_TOKEN",
+    "GITHUB_TOKEN"
+   ]
+  },
+  "requester_pubkey_b64": "1ldoZISgal7nLIR13BjGJUpgaknRUpMF1nrJ+iDQ7Xo="
+ },
+ "remote_identity": "AGE-SECRET-KEY-1U5L4JNPYT3R2YV5E22CXNR6USQNYHL96UYVYNARR4K0DMYKU4E5SRM7002",
+ "store": {
+  "index.age": "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSArbU01c1NsSHNwZUNmLytqQjNkZGt6cnV2R1FHRzVPaU1COTBsQ05RQVNFCnYyTFVabk5TZ3YyQjhlNWpCMndWc0hiVzcxNTY5UFFYc3lMcklDVWZERUEKLT4gWDI1NTE5IFJpQW1ZTTc2R0ZlTzdHdU1aOFljd2U3eHRmRUdjdXBNcUdkWEtwOC9MelEKeEFyN3lwZkhNd2xMM01VMEt3aFFtOWUrU2FqK1h5eFJWNC9FUDVsQUR6ZwotLS0gUGdkeDR0cHViTHRlbnU4T1VOVFlLd3dzR2k3VU0xanJITldNbEoxNDlqMAoSlWbGzfJUz9/UzyWpFb7Bzos2w2r8U2E+YQpukYuGUow9hqZm3GrjNi4vJOnv6DzWtf2xgPhNyVIqwqwfjL+34vOy4KSealRRc4OfEJY9mzcyWxVrw/9johsYaG/oEkavRdk8P6wDQf8/uDC2SuDEzN7fDEP/oYeMyOXUlYl5l+o15v8CjSeU7RlRxNv+fYuBGZ1Enjke31egZayR1SflKNQVALsZ+l2vezLEDvkxg8GbvBUs6D5BHLqSN1whYk47GSxwCowjgJMicLkSuo5P9lUEI/VQ6jkZfETetW25y6crE5a2/jVQsVpP83TIIk1Cwmnm8AAbr+5PNZzkiIq8r0hf/s08g9hRb0wQ5PCyXZ+9h43r6nO1x6kgZFuCNjyLnft2NkfB01uLETr8qTbXcOb/5X+8L19E+WksiHLF6BES/MOHoD10vcVKDm6aMW+piFA7yziHy+yQPOxDvPUsAv6agFP0xv9G0opn8v3mG6oOZeRKPzYanG8gpCyVzflHOgOgDgg8D70qzBgdtWkS50IeX9DK5v6eDUNqCgztZr1/A5rpF5uujbavR4wtBX+/0AzjnoIECpQvoNldPizHp3eX3mSmTICI4NQva+U2abyk7bjtPTr+rNWNdZ+GOmVWl6Ahvr9uxqVetXbaJa1FoJD0B/EgkXX/H4nz67rWdESZh3AC9kM1glshqvK2lPclX5N50J4V1rjLHAHMNQhgOBy6o2kS4vqVhB4LGKrgtMDMpw/3yP2z+bF959OBj7KnaUw9wgnsdoi0Cx/21CE3xTzTJVMa5ogBCeUD4mtNz/KMurqw49g87GPmqVe3jnFJgUndZjjkgLKTEvInhfRojaxmAi4qUnvNt3CFe9epghhzUfACULC5pngM1nAyDC9brwuZn51nU7cVAvsQqJxjCJ+ZLTtsw4IrnIpqB5TOdGuDSJ7ccJPiSHgNJjj+OT2hRwJd+1s9xCLi3j03RGtKEdw67rLjxtON6dyt75cmk3qWeN6dMJuo8ARLcYl87PSY6EhdgMNwgL9vaEZsXBBVAH+WCKx+79tFWgDuGeL8KA==",
+  "vars/55646e037c39dccea1d63aed91276b2cb6c056845ef4c076d5019a8445c95b49.age": "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAzbDQrWjVXTGJqbnNzN3BLRTh3aWsyN1JqVmdtakVwcEFXM1JmaXUyL2dJCmxHcFFCSExSc1Z6ZFFiZkY3MzJ6UmR6RzVxZ1FMd0lJbmEyY0JYTnN2ZVEKLT4gWDI1NTE5IHY0WUp5N011YnE3eXZRb29idTM3b3hXT3ZtbnhBcm5Jc25UNktrdmlZVVkKVXFWL0xsZnYxVHZtMTUwYlNvWHE2VmhZTmlyM3FuM0JnaGJTeUZNL2ZYawotLS0gR3FDSkY5cmZ3U202VHBSZWx2TEhtNGtOWmtuM0ZaMFh6WHlzaS8xeGE0dwrwxD4aq5ltRkYq4l4ymiQORnsqjoBCADD7hRRbOH5uJh0y8c5sQRzXh0/ymI/QMtZPrfP4mvD/xkPjd5yTWxYEmDGy+iRl772DHSWh0UbShpG7SUHGX/XjksdVMiCIjruNbgOtqe3KUOXGsQoGHaDLzoswU0pjC6Asiv+72A956H6q/euA2F96wscuxiblfqPjAjK026wyqJieqa4zvApEAMunyq8puCiP4F3WS/gdQY2s+rfyV9yfj5iT97aO6mzdM6qlb4rPQuwnrSVUpHQgk3Yhn1oiw/Q+rupAnWpkoy4FdM+DztNuTxu7ASQIqsuEwlUDVDa0HUe+lf36Id2W4Of+e1CE0EpwAE5NlDA5x/SmBi5safQ/0DANtseMWmU=",
+  "vars/9902af1b37d53f46d894ffc1ee02d0ffdc8b6926964eb2969f1656fac18a86a4.age": "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBhWkVObDF0ZmNmSDJUelVuL2lzamhtRHV2aWFzVWNicHQ0Tm02K0RuTG04CnZ5YUM5UEJ5eXZWa3FnNWlsRkVaYjNUbFZhS3hQcnRjYzlXNUp4N051N3cKLT4gWDI1NTE5IGUyZ2dPTlRmZzJyRzZMUENXREJKYk9xR25BTkJ4V25zTGFvSVlQd3JWUmsKN0FNamxTcElJR2NaOXR3U0l2bkZXOXY0RENodmcraTFCQ2R2ek94NHpmQQotLS0gL0pFakZLL1EvN1JIZnRMTGorZTV4SXBXeFQ0bXVQVkplaGJlUkhhbG0yZwoYGr++kj+KLVfdg2gWJX936CSXkSVplcWrKSVtEsKhSdKca137dv8zE8Mjm1KPUFNoFIBPLI8ZLy5qXJAXwCCbwn/GBK61L9BdUP0HJvfZsBgmt3GAaVkptFmYwWLfzKW60T5eAqdjAfQTWNqNPB6AgQJP8qsg4UdWuF+dk7+ZXr3wZY+9Q0Qa3XtzaGJ8TBfhYoQoB5JOhmUjEel/7sTx2mRUeXthVKlUal8BcrHDMiF6w6LeCzrndsKdGXP4FSxC6EVyVWUT0KQZf/RM562zGBrYtEjeucyAc1DZvUgjC1c5rBss9jyWIJiKJ9Nvcp0ACR86zhtIvF6BW0hnez4gqfThpYMOtV69U/GNwLIkYq6Wpu9u054/ZXQTaM2zitQ=",
+  "vars/ca43a3a28bf3abd85ff1ac5c7777b3da9c764a97102a338df35b34497123e834.age": "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA4SHpPM3ErK2x1ZURKSTlyTWMvRnRaUzN0SU9sR0tlZEpkUEkxME0yYTNnCkJlL1FCUzg3THI5Q1UyNjJ0WHRodC9FMW1UaE53dUhkVTltZXU2U3hkM28KLT4gWDI1NTE5IHNCejNNdlArT0c3azZGYU5rOXFpdXhZa2VaUlc1NDZZajdsRkcwSkpYajQKakJaSitndFNralBqSThrcDlsK1FvUEwwVWVmUWJHQk4zMDdpQ0RxT200NAotLS0gZWRSU0QzSjMvaWtITDNQM04xbmwrUVg5NmpXTzFVMGM2dnZVaVhIWmZ1UQpstJY+KOM6oKzZ/T7s5GOHtNowtE7cX7bRt81+RJlycnoUUtghNMcZmovQanrQKPaNWjWVjKZugCstyPf6al7g/XjDFuuXMTygWBdHWd2yLOWv87Hhf8yhipfCNHLRsdGfxvSpDMsFZ8G9AOsRYH7SNm2ZH5+IKBwfScL716w7KZ31f+vulZSe/2CdapP0KGxm4R2J8OL5f0C+uwUwsA719h/v14nqlQG/qmHa9OsPl2OwtfzsyxUY799FMCfTDlYaxKWTuLZyw1kkAkHze5XFOBf9GvAjG0xRHZPFeZeOunS4PoSKlsvVAKtZ0947qCpcZ4unHgVujRzSIhx7QUk1iEZWM4HD5bLyntdahMWUTVBaUE9HxDsDZKERKBTlFSA="
+ }
+}

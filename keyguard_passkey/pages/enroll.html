@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f6f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1310" media="(prefers-color-scheme: dark)">
+<title>Keyguard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232c7a4b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7.5' cy='15.5' r='4.5'/%3E%3Cpath d='M10.7 12.3 20 3M17 6l2.5 2.5M14 9l2 2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./unlock.css">
+<link rel="modulepreload" href="./page.js">
+<link rel="modulepreload" href="./unlock-core.js">
+<link rel="modulepreload" href="./typage.js">
+</head>
+<body>
+<main class="sheet">
+  <header class="intro">
+    <p class="brand">Keyguard</p>
+    <h1 id="title">Enrol a passkey</h1>
+    <p class="lead" id="lead"></p>
+  </header>
+
+  <form id="add" class="panel form" hidden>
+    <label for="name">Name for this device</label>
+    <input id="name" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="ipad">
+    <label class="check" id="replace-row" hidden>
+      <input type="checkbox" id="replace"> Replace the enrolment with this name
+    </label>
+    <div class="row" id="source-row" hidden>
+      <label for="source">Unlock with the passkey enrolled as</label>
+      <select id="source"></select>
+    </div>
+    <button type="submit" id="add-device" class="primary" disabled>Add this device</button>
+    <p class="note">Unlocks the store key with a passkey you already have, then wraps it under a new passkey made
+       on this device. The public key, the store's recipients and the paper backup stay as they are.</p>
+  </form>
+
+  <form id="mint" class="panel form" hidden>
+    <div class="row" id="device-row">
+      <label for="device">Device name</label>
+      <input id="device" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="iphone">
+    </div>
+    <label for="pass">Paper-backup passphrase</label>
+    <input id="pass" type="password" autocomplete="new-password" placeholder="at least 12 characters">
+    <label for="pass2">Confirm passphrase</label>
+    <input id="pass2" type="password" autocomplete="new-password">
+    <button type="submit" id="enrol" class="primary" disabled>Enrol this device</button>
+    <p class="note" id="mint-note"></p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <section id="result" class="panel result" hidden>
+    <p id="result-lead"></p>
+    <pre id="pubkey"></pre>
+  </section>
+
+  <button type="button" id="refuse" class="quiet" hidden>Cancel</button>
+  <a id="switch" class="quiet" href="/enroll" hidden>Add this device instead</a>
+</main>
+
+<script type="module" src="./enroll.js"></script>
+</body>
+</html>

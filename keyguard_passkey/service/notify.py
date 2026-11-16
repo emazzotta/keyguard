@@ -1,0 +1,121 @@
+"""Relay Claude session pings to Telegram, each headed `Claude on <origin>:`, off unless a bot is set.
+
+The origin is the label of how the caller authenticated: the request token or the identity header.
+Unlock requests send nothing here.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import threading
+import unicodedata
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Final, Protocol, Union
+from uuid import UUID
+
+API_BASE: Final = "https://api.telegram.org"
+SEND_TIMEOUT_SECONDS: Final = 10
+SAFE_HOST: Final = re.compile(r"[A-Za-z0-9-]{1,63}")
+NOTICE_TEXT_LIMIT: Final = 300
+NOTICE_INPUT_LIMIT: Final = 4000
+ELLIPSIS: Final = "\u2026"
+
+Send = Callable[[urllib.request.Request], object]
+Spawn = Callable[..., None]
+
+
+def _post(request: urllib.request.Request) -> None:
+    with urllib.request.urlopen(request, timeout=SEND_TIMEOUT_SECONDS) as response:
+        response.read()
+
+
+def _in_background(function: Callable[..., None], *args: object) -> None:
+    threading.Thread(target=function, args=args, daemon=True).start()
+
+
+@dataclass(frozen=True)
+class ClaudeNotice:
+    session: UUID
+    container: str | None
+    text: str
+    origin: str
+
+
+class NoticeError(ValueError):
+    pass
+
+
+def parse_notice(payload: object, origin: str) -> ClaudeNotice:
+    if not isinstance(payload, dict):
+        raise NoticeError("a notice is a JSON object")
+    session, container, text = payload.get("session"), payload.get("container"), payload.get("text")
+    if not isinstance(session, str):
+        raise NoticeError("session must be a UUID")
+    if container is not None and not (isinstance(container, str) and SAFE_HOST.fullmatch(container)):
+        raise NoticeError("container must be a host label")
+    if not isinstance(text, str) or len(text) > NOTICE_INPUT_LIMIT or not plain(text):
+        raise NoticeError(f"text must be 1 to {NOTICE_INPUT_LIMIT} characters")
+    return ClaudeNotice(UUID(session), container, text, origin)
+
+
+def plain(text: str) -> str:
+    visible = "".join(" " if unicodedata.category(char).startswith("C") else char for char in text)
+    return " ".join(visible.split())
+
+
+def capped(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + ELLIPSIS
+
+
+def notice_line(notice: ClaudeNotice) -> str:
+    where = f"session {notice.session}"
+    if notice.container:
+        where += f", container {notice.container}"
+    return f"Claude on {notice.origin}: {capped(plain(notice.text), NOTICE_TEXT_LIMIT)}\n{where}"
+
+
+def _describe(error: Exception) -> str:
+    if isinstance(error, urllib.error.HTTPError):
+        return f"HTTP {error.code}"
+    return type(error).__name__
+
+
+class Notifier(Protocol):
+    def claude_notice(self, notice: ClaudeNotice) -> None: ...
+
+
+class TelegramNotifier:
+    def __init__(self, token: str, chat_id: str, send: Send = _post, spawn: Spawn = _in_background) -> None:
+        self._token = token
+        self._chat_id = chat_id
+        self._send = send
+        self._spawn = spawn
+
+    def claude_notice(self, notice: ClaudeNotice) -> None:
+        self._spawn(self._deliver, notice_line(notice))
+
+    def _deliver(self, text: str) -> None:
+        body = json.dumps({"chat_id": self._chat_id, "text": text,
+                           "link_preview_options": {"is_disabled": True}}).encode()
+        request = urllib.request.Request(f"{API_BASE}/bot{self._token}/sendMessage", data=body,
+                                         headers={"Content-Type": "application/json"})
+        try:
+            self._send(request)
+        except (OSError, ValueError) as error:
+            print(f"telegram: message not sent ({_describe(error)})", file=sys.stderr, flush=True)
+
+
+class DisabledNotifier:
+    def claude_notice(self, notice: ClaudeNotice) -> None:
+        pass
+
+
+AnyNotifier = Union[TelegramNotifier, DisabledNotifier]
+
+
+def telegram_notifier(token: str, chat_id: str) -> AnyNotifier:
+    return TelegramNotifier(token, chat_id) if token and chat_id else DisabledNotifier()

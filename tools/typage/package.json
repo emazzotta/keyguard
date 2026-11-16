@@ -1,0 +1,7 @@
+{
+  "name": "keyguard-passkey-typage-bundle",
+  "private": true,
+  "dependencies": {
+    "age-encryption": "0.3.1"
+  }
+}

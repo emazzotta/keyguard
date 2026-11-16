@@ -1,0 +1,96 @@
+#!/bin/sh
+set -eu
+
+EXIT_UNAVAILABLE=3
+EXIT_ABSENT=4
+EXIT_USAGE=64
+BASE64_MARKER="base64:"
+newline='
+'
+carriage_return=$(printf '\r')
+
+fail() {
+    code="$1"
+    shift
+    echo "keyguard provider pass: $*" >&2
+    exit "$code"
+}
+
+require_name() {
+    case "$1" in
+        '' | [!A-Za-z_]* | *[!A-Za-z0-9_]*) fail "$EXIT_USAGE" "not a variable name: $1" ;;
+    esac
+}
+
+on_one_line() {
+    case "$1" in
+        "$BASE64_MARKER"* | *"$newline"* | *"$carriage_return"*)
+            printf '%s%s' "$BASE64_MARKER" "$(printf '%s' "$1" | base64 | tr -d '\n')"
+            ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+store="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+prefix="${KEYGUARD_PASS_PREFIX:-}"
+
+entry() {
+    printf '%s%s' "${prefix:+$prefix/}" "$1"
+}
+
+require_entry() {
+    [ -f "$store/$(entry "$1").gpg" ] || fail "$EXIT_ABSENT" "not in the store: $1"
+}
+
+get_values() {
+    [ "$#" -gt 0 ] || fail "$EXIT_USAGE" "usage: get NAME..."
+    for name in "$@"; do
+        require_name "$name"
+        require_entry "$name"
+    done
+    lines=""
+    for name in "$@"; do
+        value=$(pass show "$(entry "$name")") || fail "$EXIT_UNAVAILABLE" "pass did not release $name"
+        lines="$lines$name=$(on_one_line "$value")$newline"
+    done
+    printf '%s' "$lines"
+}
+
+list_names() {
+    folder="$store${prefix:+/$prefix}"
+    [ -d "$folder" ] || fail "$EXIT_UNAVAILABLE" "no folder $folder"
+    for file in "$folder"/*.gpg; do
+        [ -e "$file" ] || continue
+        name="${file##*/}"
+        name="${name%.gpg}"
+        case "$name" in
+            [!A-Za-z_]* | *[!A-Za-z0-9_]*) continue ;;
+        esac
+        printf '%s\n' "$name"
+    done
+}
+
+set_value() {
+    [ "$#" -eq 1 ] || fail "$EXIT_USAGE" "usage: set NAME"
+    require_name "$1"
+    pass insert --multiline --force "$(entry "$1")" >/dev/null || fail "$EXIT_UNAVAILABLE" "pass did not store $1"
+}
+
+remove_value() {
+    [ "$#" -eq 1 ] || fail "$EXIT_USAGE" "usage: rm NAME"
+    require_name "$1"
+    require_entry "$1"
+    pass rm --force "$(entry "$1")" >/dev/null || fail "$EXIT_UNAVAILABLE" "pass did not remove $1"
+}
+
+verb="${1:-}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+case "$verb" in
+    get) get_values "$@" ;;
+    list) list_names ;;
+    set) set_value "$@" ;;
+    rm) remove_value "$@" ;;
+    *) fail "$EXIT_USAGE" "verb not supported: $verb" ;;
+esac
