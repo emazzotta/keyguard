@@ -72,3 +72,11 @@ python3 tools/vendor.py --pyz v0.3.0 ../other-repository/bin
 ```
 
 The command packs `keyguard_passkey/` of the tag into `keyguard-passkey.pyz` and prints its SHA-256. The file holds no dates, so the same tag gives the same bytes: Python 3.9 and 3.15 packed identical files on 2026-11-16. Anyone can pack the tag again and compare the hash. The file has no manifest, so `verify-install` exits 1 for it: compare the hash instead.
+
+From v0.3.1, each GitHub release carries this file, packed by the tag's pipeline, with its SHA-256 in the notes. A repository that keeps it can let Renovate bump the tag it pins (datasource `github-releases`, package `emazzotta/keyguard-passkey`) and download the release's file in the same pull request, as a `postUpgradeTasks` command:
+
+```bash
+curl -fsSL -o bin/keyguard-passkey.pyz https://github.com/emazzotta/keyguard-passkey/releases/download/v0.3.1/keyguard-passkey.pyz
+```
+
+A check in that repository's CI packs the pinned tag again and compares the bytes, so a pull request whose file is not the tag's fails.

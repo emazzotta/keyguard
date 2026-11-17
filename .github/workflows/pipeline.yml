@@ -68,6 +68,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
 
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, browser, pages, secrets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Pack the client at the tag
+        run: python3 tools/vendor.py --pyz "$GITHUB_REF_NAME" "$RUNNER_TEMP"
+      - name: Publish the release with the packed client
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(sha256sum "$RUNNER_TEMP/keyguard-passkey.pyz" | cut -d' ' -f1)
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/keyguard-passkey.pyz" --verify-tag \
+            --title "keyguard-passkey ${GITHUB_REF_NAME#v}" \
+            --notes "keyguard-passkey.pyz SHA-256: $sha. \`python3 tools/vendor.py --pyz $GITHUB_REF_NAME DIR\` packs the same bytes from the tag."
+
   image:
     needs: [lint, test, browser, pages, secrets]
     runs-on: ubuntu-latest
