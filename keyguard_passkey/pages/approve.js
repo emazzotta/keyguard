@@ -1,7 +1,7 @@
 import * as core from './unlock-core.js'
 import {
-  $, PASSKEY_CANCELLED, answerAndClose, authenticatorProblem, capitalized, chip, describe, isCancelled, onSubmit,
-  openTransport, reportLost, setStatus, withinAuthenticatorTime,
+  $, answerAndClose, authenticatorProblem, capitalized, chip, describe, isCancelled, onSubmit,
+  openTransport, passkeyRefused, reportLost, setStatus, withinAuthenticatorTime,
 } from './page.js'
 import { retryingStale } from './store-client.js'
 
@@ -116,7 +116,7 @@ const retry = (text) => {
 
 const settleFailure = (error) => {
   if (error instanceof core.AbsentNames) return finish({ absent: error.names }, `${error.message}.`, 'err')
-  if (isCancelled(error)) return retry(PASSKEY_CANCELLED)
+  if (isCancelled(error)) return retry(passkeyRefused(error))
   if (error instanceof core.RecipientsChanged) {
     pendingRecipients = error.recipients
     $('trust').hidden = false

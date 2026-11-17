@@ -1,7 +1,7 @@
 import { age } from './typage.js'
 import * as core from './unlock-core.js'
 import {
-  $, PASSKEY_CANCELLED, answerAndClose, authenticatorProblem, describe, isCancelled, onSubmit, openTransport,
+  $, answerAndClose, authenticatorProblem, describe, isCancelled, onSubmit, openTransport, passkeyRefused,
   reportLost, setStatus, withinAuthenticatorTime,
 } from './page.js'
 import { textFile } from './store-client.js'
@@ -68,7 +68,7 @@ const showMinted = ({ recipient, creating }) => {
 const settleMintFailure = (error) => {
   if (isCancelled(error) || !transport.ceremony) {
     $('enrol').disabled = false
-    return setStatus(isCancelled(error) ? PASSKEY_CANCELLED : `Failed: ${describe(error)}.`, 'err')
+    return setStatus(isCancelled(error) ? passkeyRefused(error) : `Failed: ${describe(error)}.`, 'err')
   }
   return answerAndClose(transport, { error: describe(error) }, `Failed: ${describe(error)}.`, 'err', ['mint'])
 }
@@ -151,7 +151,7 @@ const addDevice = async () => {
   try {
     await addPasskey(name, replacing)
   } catch (error) {
-    setStatus(isCancelled(error) ? PASSKEY_CANCELLED : `Failed: ${describe(error)}.`, 'err')
+    setStatus(isCancelled(error) ? passkeyRefused(error) : `Failed: ${describe(error)}.`, 'err')
   } finally {
     $('add-device').disabled = false
   }

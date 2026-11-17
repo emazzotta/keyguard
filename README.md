@@ -18,7 +18,7 @@ A machine without a browser, such as a dev box or a container, asks through the 
 | Windows 11 | Edge or Chrome 147 or later with Windows Hello | not measured yet |
 | any | Safari, Firefox, a security key, a phone | not measured yet |
 
-A browser without an authenticator, or without PRF, gets a message that names what to set up. The page does not start a passkey request there.
+A browser without an authenticator, or without PRF, gets a message that names what to set up. The page does not start a passkey request there. A refused prompt shows the reason the browser gave, and says when an extension has taken over passkey requests. KeePassXC-Browser with its passkeys option on is one: KeePassXC refuses this page's request, whose challenge is shorter than the 16 characters it requires.
 
 ## Install
 

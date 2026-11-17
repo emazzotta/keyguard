@@ -6,8 +6,11 @@ const AUTHENTICATOR_TIMEOUT_MS = 120_000
 const NO_AUTHENTICATOR = 'This browser reports no authenticator: set up Windows Hello or Touch ID, or use a browser ' +
   'that can reach a phone.'
 const NO_PRF = 'This browser cannot derive a key from a passkey (no PRF support). Update it or use another browser.'
-export const PASSKEY_CANCELLED = 'The passkey prompt was cancelled or timed out. Try again. A browser inside a chat ' +
-  'or mail app cannot use passkeys: open the link in your own browser.'
+const PASSKEY_REFUSED = 'The passkey prompt was cancelled, timed out or refused.'
+const IN_APP_BROWSER = 'Try again. A browser inside a chat or mail app cannot use passkeys: open the link in your ' +
+  'own browser.'
+const EXTENSION_TAKES_PASSKEYS = 'A browser extension takes the passkey requests on this page, such as ' +
+  'KeePassXC-Browser with its passkeys option on. Turn that option off and try again.'
 
 export const $ = (id) => document.getElementById(id)
 
@@ -27,6 +30,14 @@ export const chip = (text) => {
 }
 
 export const isCancelled = (error) => error?.name === 'NotAllowedError'
+
+const answeredByBrowser = (create) =>
+  typeof create !== 'function' || Function.prototype.toString.call(create).includes('[native code]')
+
+export const passkeyRefused = (error, create = globalThis.navigator?.credentials?.create) => {
+  const hint = answeredByBrowser(create) ? IN_APP_BROWSER : EXTENSION_TAKES_PASSKEYS
+  return `${PASSKEY_REFUSED} ${hint} Reason given: ${describe(error)}`
+}
 
 export const onSubmit = (id, handler) => $(id).addEventListener('submit', (event) => {
   event.preventDefault()
