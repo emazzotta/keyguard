@@ -2,7 +2,7 @@ import { age } from './typage.js'
 import * as core from './unlock-core.js'
 import {
   $, answerAndClose, authenticatorProblem, describe, isCancelled, onSubmit, openTransport, passkeyRefused,
-  reportLost, setStatus, withinAuthenticatorTime,
+  reportLost, retryAfterClick, setStatus, withinAuthenticatorTime,
 } from './page.js'
 import { textFile } from './store-client.js'
 
@@ -30,6 +30,19 @@ const passphraseProblem = () => {
 
 const hasIndex = (meta) => Object.hasOwn(meta.files ?? {}, core.INDEX_FILE)
 
+const continueClicked = (error) => new Promise((resolve) => {
+  const { textContent: text, className: kind } = $('status')
+  setStatus(`Press Continue for the next passkey prompt. Reason given: ${describe(error)}`)
+  $('continue').hidden = false
+  $('continue').addEventListener('click', () => {
+    $('continue').hidden = true
+    setStatus(text, kind)
+    resolve()
+  }, { once: true })
+})
+
+const nextPasskeyPrompt = (request) => retryAfterClick(request, continueClicked)
+
 const underPassphrase = async (remote, passphrase) => {
   const sealer = new age.Encrypter()
   sealer.setPassphrase(passphrase)
@@ -43,7 +56,7 @@ const mint = async (device) => {
   const recipient = await age.identityToRecipient(remote)
   setStatus('Wrapping the store key under the passkey and the paper passphrase\u2026', 'busy')
   const files = {
-    [`identity-remote.${device}.age`]: core.b64encode(await core.wrapRemote(remote, passkey)),
+    [`identity-remote.${device}.age`]: core.b64encode(await nextPasskeyPrompt(() => core.wrapRemote(remote, passkey))),
     [core.passkeyPath(device)]: textFile(passkey),
     [`identity-remote.${core.PAPER}.age`]: core.b64encode(await underPassphrase(remote, $('pass').value)),
   }
@@ -66,6 +79,7 @@ const showMinted = ({ recipient, creating }) => {
 }
 
 const settleMintFailure = (error) => {
+  $('continue').hidden = true
   if (isCancelled(error) || !transport.ceremony) {
     $('enrol').disabled = false
     return setStatus(isCancelled(error) ? passkeyRefused(error) : `Failed: ${describe(error)}.`, 'err')
@@ -126,9 +140,9 @@ const addPasskey = async (name, replacing) => {
   if (!remote) return
   const keyName = core.passkeyName(name)
   setStatus('Creating a passkey on this device\u2026', 'busy')
-  const passkey = await age.webauthn.createCredential({ keyName })
+  const passkey = await nextPasskeyPrompt(() => age.webauthn.createCredential({ keyName }))
   setStatus('Wrapping the store key under the new passkey\u2026', 'busy')
-  const wrapped = await core.wrapRemote(remote, passkey)
+  const wrapped = await nextPasskeyPrompt(() => core.wrapRemote(remote, passkey))
   setStatus('Saving to the store\u2026', 'busy')
   await store.commit({ [`identity-remote.${name}.age`]: core.b64encode(wrapped), [core.passkeyPath(name)]: textFile(passkey) })
   transport.rememberEnrolment(name, passkey)

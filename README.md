@@ -20,6 +20,8 @@ A machine without a browser, such as a dev box or a container, asks through the 
 
 A browser without an authenticator, or without PRF, gets a message that names what to set up. The page does not start a passkey request there. A refused prompt shows the reason the browser gave, and says when an extension has taken over passkey requests. KeePassXC-Browser with its passkeys option on is one: KeePassXC refuses this page's request, whose challenge is shorter than the 16 characters it requires.
 
+Creating the store takes two passkey prompts, and adding a device three. Safari and Zen on macOS refuse a prompt that follows another without a click in between (seen 2026-11-17), so the page then asks for a click on Continue.
+
 ## Install
 
 From a checkout, with nothing to build:

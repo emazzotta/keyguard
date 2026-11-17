@@ -67,6 +67,17 @@ REWRITE_INDEX_AS_FORMAT = """async ([passphrase, token, format, reader]) => {
 }"""
 
 
+REFUSE_THE_FIRST_PASSKEY_READ = """(() => {
+  const read = navigator.credentials.get.bind(navigator.credentials)
+  let refused = false
+  navigator.credentials.get = (options) => {
+    if (refused) return read(options)
+    refused = true
+    return Promise.reject(new DOMException('The document is not focused.', 'NotAllowedError'))
+  }
+})()"""
+
+
 @pytest.fixture(scope="module")
 def browser() -> Iterator[Browser]:
     with browser_with_authenticator() as opened:
@@ -160,6 +171,23 @@ def test_should_enrol_and_approve_with_the_keyboard_alone(browser, tmp_path):
 
     assert enrolling.finish()[0] == 0
     assert setting.finish()[0] == 0
+
+
+@pytest.mark.spec("README.md")
+def test_should_create_the_store_after_a_click_when_the_browser_refuses_the_second_passkey_prompt(browser, tmp_path):
+    running = Running(tmp_path / "store", ("init",), None, None)
+    with separate_window(browser) as refusing:
+        page = refusing.page
+        page.add_init_script(REFUSE_THE_FIRST_PASSKEY_READ)
+        page.goto(running.address)
+        page.fill("#pass", PASSPHRASE)
+        page.fill("#pass2", PASSPHRASE)
+        page.click("#enrol")
+
+        page.click("#continue")
+        wait_until_answered(page)
+
+    assert running.finish()[0] == 0
 
 
 @pytest.mark.spec("README.md")

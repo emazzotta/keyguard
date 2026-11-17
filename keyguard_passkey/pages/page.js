@@ -39,6 +39,16 @@ export const passkeyRefused = (error, create = globalThis.navigator?.credentials
   return `${PASSKEY_REFUSED} ${hint} Reason given: ${describe(error)}`
 }
 
+export const retryAfterClick = async (request, click) => {
+  try {
+    return await request()
+  } catch (error) {
+    if (!isCancelled(error)) throw error
+    await click(error)
+    return request()
+  }
+}
+
 export const onSubmit = (id, handler) => $(id).addEventListener('submit', (event) => {
   event.preventDefault()
   handler()
