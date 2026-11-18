@@ -117,6 +117,31 @@ The asking machine needs `age` and OpenSSL 3 on `PATH`: it signs with OpenSSL an
 
 A request expires after 5 minutes. The service keeps open requests in memory only, so a restart drops them, and the asking command reports that the service no longer holds its request.
 
+## Session Pings
+
+`POST /notify` relays a ping from a Claude Code session to the Telegram chat in `KEYGUARD_PASSKEY_TELEGRAM_CHAT_ID`. Without a bot token and chat, the service accepts the ping and drops it. The body is a JSON object:
+
+| Field | Value |
+|---|---|
+| `session` | The session's UUID |
+| `container` | Optional: the host label of the container that runs the session |
+| `text` | 1 to 4000 characters |
+| `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default) |
+
+The service answers `202` and sends in the background, `400` for any other body, and `429` past 20 pings a minute. It writes the message itself in Telegram HTML and escapes each value, so a caller cannot add a line or a tag:
+
+```
+Claude on dev box
+
+⏳ Waiting for your OK to push 2 commits.
+
+devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
+```
+
+- The heading is bold. It names the caller from how it authenticated (`KEYGUARD_PASSKEY_TOKEN_LABEL` or `KEYGUARD_PASSKEY_IDENTITY_LABEL`), not from the body.
+- The text opens with ⏳ for a prompt and 💬 for a finished reply. It loses control and format characters and stops at 300 characters.
+- The last line holds the container, when the body names one, and the session as code, which a tap copies.
+
 ## Limits
 
 - The service serves the pages. Whoever can change the service's files or image can change the code that decrypts on your phone. The pinned keys stop a forged request, not a changed page. Run the image of a release tag, and keep the service where only you can change it.
