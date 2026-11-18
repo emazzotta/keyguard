@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Final, Protocol, Union
 from uuid import UUID
 
@@ -26,6 +27,15 @@ NOTICE_INPUT_LIMIT: Final = 4000
 ELLIPSIS: Final = "\u2026"
 SEPARATOR: Final = " \u00b7 "
 PARSE_MODE: Final = "HTML"
+
+
+class NoticeKind(Enum):
+    FINISHED = "finished"
+    PROMPT = "prompt"
+
+
+NOTICE_KINDS: Final = {kind.value: kind for kind in NoticeKind}
+NOTICE_MARKS: Final = {NoticeKind.FINISHED: "\U0001f4ac", NoticeKind.PROMPT: "\u23f3"}
 
 Send = Callable[[urllib.request.Request], object]
 Spawn = Callable[..., None]
@@ -46,6 +56,7 @@ class ClaudeNotice:
     container: str | None
     text: str
     origin: str
+    kind: NoticeKind = NoticeKind.FINISHED
 
 
 class NoticeError(ValueError):
@@ -62,7 +73,13 @@ def parse_notice(payload: object, origin: str) -> ClaudeNotice:
         raise NoticeError("container must be a host label")
     if not isinstance(text, str) or len(text) > NOTICE_INPUT_LIMIT or not plain(text):
         raise NoticeError(f"text must be 1 to {NOTICE_INPUT_LIMIT} characters")
-    return ClaudeNotice(UUID(session), container, text, origin)
+    return ClaudeNotice(UUID(session), container, text, origin, parse_kind(payload.get("kind", NoticeKind.FINISHED.value)))
+
+
+def parse_kind(kind: object) -> NoticeKind:
+    if not isinstance(kind, str) or kind not in NOTICE_KINDS:
+        raise NoticeError(f"kind must be one of {', '.join(NOTICE_KINDS)}")
+    return NOTICE_KINDS[kind]
 
 
 def plain(text: str) -> str:
@@ -77,9 +94,10 @@ def capped(text: str, limit: int) -> str:
 def notice_message(notice: ClaudeNotice) -> str:
     heading = f"<b>Claude on {html.escape(notice.origin, quote=False)}</b>"
     text = html.escape(capped(plain(notice.text), NOTICE_TEXT_LIMIT), quote=False)
+    mark = NOTICE_MARKS[notice.kind]
     handle = f"<code>{notice.session}</code>"
     footer = f"{notice.container}{SEPARATOR}{handle}" if notice.container else handle
-    return f"{heading}\n{text}\n\n{footer}"
+    return f"{heading}\n\n{mark} {text}\n\n{footer}"
 
 
 def _describe(error: Exception) -> str:

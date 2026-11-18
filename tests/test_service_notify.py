@@ -24,6 +24,8 @@ TOKEN = "123456:bot-secret"
 CHAT = "4242"
 SESSION = "4a015f0f-199b-4270-9c06-fecc5d85b976"
 ORIGIN = "dev box"
+SPEECH_BALLOON = "\U0001f4ac"
+HOURGLASS = "\u23f3"
 
 
 def run_inline(function, *args):
@@ -40,6 +42,14 @@ def notice(**over: object) -> dict[str, object]:
 
 def ping(target: TelegramNotifier) -> None:
     target.claude_notice(parse_notice(notice(), ORIGIN))
+
+
+def text_line(message: str) -> str:
+    return message.splitlines()[2]
+
+
+def text_of(message: str) -> str:
+    return text_line(message).split(" ", 1)[1]
 
 
 @pytest.mark.spec("docs/service.md")
@@ -112,14 +122,27 @@ def test_should_head_the_text_with_the_origin_and_end_with_container_and_session
     ping(notifier(sent.append))
 
     assert json.loads(sent[0].data)["text"] == (
-        f"<b>Claude on dev box</b>\nWaiting for your OK.\n\ndevbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>")
+        f"<b>Claude on dev box</b>\n\n{SPEECH_BALLOON} Waiting for your OK.\n\n"
+        f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>")
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_leave_out_the_container_when_the_notice_has_none():
     message = notice_message(parse_notice(notice(container=None), "laptop"))
 
-    assert message == f"<b>Claude on laptop</b>\nWaiting for your OK.\n\n<code>{SESSION}</code>"
+    assert message == f"<b>Claude on laptop</b>\n\n{SPEECH_BALLOON} Waiting for your OK.\n\n<code>{SESSION}</code>"
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("kind", "mark"), [
+    ({"kind": "prompt"}, HOURGLASS),
+    ({"kind": "finished"}, SPEECH_BALLOON),
+    ({}, SPEECH_BALLOON),
+])
+def test_should_open_the_text_with_the_mark_of_its_kind(kind, mark):
+    message = notice_message(parse_notice(notice(**kind), "laptop"))
+
+    assert text_line(message) == f"{mark} Waiting for your OK."
 
 
 @pytest.mark.spec("docs/service.md")
@@ -128,12 +151,12 @@ def test_should_flatten_control_and_format_characters_out_of_the_text():
 
     message = notice_message(ClaudeNotice(UUID(SESSION), None, text, "laptop"))
 
-    assert message.splitlines()[1] == "line one line two Keyguard"
+    assert text_of(message) == "line one line two Keyguard"
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_cap_a_long_text_with_an_ellipsis():
-    body = notice_message(ClaudeNotice(UUID(SESSION), None, "x" * 1000, "laptop")).splitlines()[1]
+    body = text_of(notice_message(ClaudeNotice(UUID(SESSION), None, "x" * 1000, "laptop")))
 
     assert len(body) == NOTICE_TEXT_LIMIT
     assert body.endswith("\u2026")
@@ -143,13 +166,13 @@ def test_should_cap_a_long_text_with_an_ellipsis():
 def test_should_escape_html_in_the_origin_and_the_text():
     message = notice_message(ClaudeNotice(UUID(SESSION), None, "<b>1 < 2 & 3 > 2</b>", "<i>laptop</i>"))
 
-    assert message.splitlines()[:2] == [
-        "<b>Claude on &lt;i&gt;laptop&lt;/i&gt;</b>", "&lt;b&gt;1 &lt; 2 &amp; 3 &gt; 2&lt;/b&gt;"]
+    assert message.splitlines()[0] == "<b>Claude on &lt;i&gt;laptop&lt;/i&gt;</b>"
+    assert text_of(message) == "&lt;b&gt;1 &lt; 2 &amp; 3 &gt; 2&lt;/b&gt;"
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_cap_the_text_before_escaping_it_so_no_entity_is_cut():
-    body = notice_message(ClaudeNotice(UUID(SESSION), None, "&" * 1000, "laptop")).splitlines()[1]
+    body = text_of(notice_message(ClaudeNotice(UUID(SESSION), None, "&" * 1000, "laptop")))
 
     assert body == "&amp;" * (NOTICE_TEXT_LIMIT - 1) + "\u2026"
 
@@ -165,6 +188,9 @@ def test_should_cap_the_text_before_escaping_it_so_no_entity_is_cut():
     notice(text=" \u200b\n"),
     notice(text=7),
     notice(text="x" * (NOTICE_INPUT_LIMIT + 1)),
+    notice(kind="question"),
+    notice(kind=None),
+    notice(kind=["prompt"]),
 ])
 def test_should_refuse_a_malformed_notice(payload):
     with pytest.raises(ValueError):
