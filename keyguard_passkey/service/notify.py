@@ -1,10 +1,11 @@
-"""Relay Claude session pings to Telegram, each headed `Claude on <origin>:`, off unless a bot is set.
+"""Relay Claude session pings to Telegram, each headed `Claude on <origin>`, off unless a bot is set.
 
 The origin is the label of how the caller authenticated: the request token or the identity header.
 Unlock requests send nothing here.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 import sys
@@ -23,6 +24,8 @@ SAFE_HOST: Final = re.compile(r"[A-Za-z0-9-]{1,63}")
 NOTICE_TEXT_LIMIT: Final = 300
 NOTICE_INPUT_LIMIT: Final = 4000
 ELLIPSIS: Final = "\u2026"
+SEPARATOR: Final = " \u00b7 "
+PARSE_MODE: Final = "HTML"
 
 Send = Callable[[urllib.request.Request], object]
 Spawn = Callable[..., None]
@@ -71,11 +74,12 @@ def capped(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip() + ELLIPSIS
 
 
-def notice_line(notice: ClaudeNotice) -> str:
-    where = f"session {notice.session}"
-    if notice.container:
-        where += f", container {notice.container}"
-    return f"Claude on {notice.origin}: {capped(plain(notice.text), NOTICE_TEXT_LIMIT)}\n{where}"
+def notice_message(notice: ClaudeNotice) -> str:
+    heading = f"<b>Claude on {html.escape(notice.origin, quote=False)}</b>"
+    text = html.escape(capped(plain(notice.text), NOTICE_TEXT_LIMIT), quote=False)
+    handle = f"<code>{notice.session}</code>"
+    footer = f"{notice.container}{SEPARATOR}{handle}" if notice.container else handle
+    return f"{heading}\n{text}\n\n{footer}"
 
 
 def _describe(error: Exception) -> str:
@@ -96,10 +100,10 @@ class TelegramNotifier:
         self._spawn = spawn
 
     def claude_notice(self, notice: ClaudeNotice) -> None:
-        self._spawn(self._deliver, notice_line(notice))
+        self._spawn(self._deliver, notice_message(notice))
 
     def _deliver(self, text: str) -> None:
-        body = json.dumps({"chat_id": self._chat_id, "text": text,
+        body = json.dumps({"chat_id": self._chat_id, "text": text, "parse_mode": PARSE_MODE,
                            "link_preview_options": {"is_disabled": True}}).encode()
         request = urllib.request.Request(f"{API_BASE}/bot{self._token}/sendMessage", data=body,
                                          headers={"Content-Type": "application/json"})
