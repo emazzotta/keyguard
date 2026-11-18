@@ -12,6 +12,7 @@ import pytest
 from keyguard_passkey.service.notify import (
     NOTICE_INPUT_LIMIT,
     NOTICE_TEXT_LIMIT,
+    NOTICE_TITLE_LIMIT,
     ClaudeNotice,
     DisabledNotifier,
     TelegramNotifier,
@@ -134,6 +135,30 @@ def test_should_leave_out_the_container_when_the_notice_has_none():
 
 
 @pytest.mark.spec("docs/service.md")
+def test_should_put_the_title_before_container_and_session():
+    message = notice_message(parse_notice(notice(title="Telegram alert layout"), ORIGIN))
+
+    assert message.splitlines()[-1] == (
+        f"Telegram alert layout \u00b7 devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>")
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("title", [{}, {"title": None}, {"title": " \u200b\n"}])
+def test_should_leave_out_a_missing_or_blank_title(title):
+    message = notice_message(parse_notice(notice(**title), ORIGIN))
+
+    assert message.splitlines()[-1] == f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>"
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_cap_the_title_before_escaping_it():
+    message = notice_message(parse_notice(notice(title="<i>" + "x" * 100, container=None), ORIGIN))
+
+    assert message.splitlines()[-1] == (
+        "&lt;i&gt;" + "x" * (NOTICE_TITLE_LIMIT - 4) + f"\u2026 \u00b7 <code>{SESSION}</code>")
+
+
+@pytest.mark.spec("docs/service.md")
 @pytest.mark.parametrize(("kind", "mark"), [
     ({"kind": "prompt"}, HOURGLASS),
     ({"kind": "finished"}, SPEECH_BALLOON),
@@ -191,6 +216,9 @@ def test_should_cap_the_text_before_escaping_it_so_no_entity_is_cut():
     notice(kind="question"),
     notice(kind=None),
     notice(kind=["prompt"]),
+    notice(title=7),
+    notice(title=["x"]),
+    notice(title="x" * (NOTICE_INPUT_LIMIT + 1)),
 ])
 def test_should_refuse_a_malformed_notice(payload):
     with pytest.raises(ValueError):

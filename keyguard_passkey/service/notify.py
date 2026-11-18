@@ -24,6 +24,7 @@ SEND_TIMEOUT_SECONDS: Final = 10
 SAFE_HOST: Final = re.compile(r"[A-Za-z0-9-]{1,63}")
 NOTICE_TEXT_LIMIT: Final = 300
 NOTICE_INPUT_LIMIT: Final = 4000
+NOTICE_TITLE_LIMIT: Final = 60
 ELLIPSIS: Final = "\u2026"
 SEPARATOR: Final = " \u00b7 "
 PARSE_MODE: Final = "HTML"
@@ -57,6 +58,7 @@ class ClaudeNotice:
     text: str
     origin: str
     kind: NoticeKind = NoticeKind.FINISHED
+    title: str | None = None
 
 
 class NoticeError(ValueError):
@@ -73,13 +75,20 @@ def parse_notice(payload: object, origin: str) -> ClaudeNotice:
         raise NoticeError("container must be a host label")
     if not isinstance(text, str) or len(text) > NOTICE_INPUT_LIMIT or not plain(text):
         raise NoticeError(f"text must be 1 to {NOTICE_INPUT_LIMIT} characters")
-    return ClaudeNotice(UUID(session), container, text, origin, parse_kind(payload.get("kind", NoticeKind.FINISHED.value)))
+    kind = parse_kind(payload.get("kind", NoticeKind.FINISHED.value))
+    return ClaudeNotice(UUID(session), container, text, origin, kind, parse_title(payload.get("title")))
 
 
 def parse_kind(kind: object) -> NoticeKind:
     if not isinstance(kind, str) or kind not in NOTICE_KINDS:
         raise NoticeError(f"kind must be one of {', '.join(NOTICE_KINDS)}")
     return NOTICE_KINDS[kind]
+
+
+def parse_title(title: object) -> str | None:
+    if title is not None and not (isinstance(title, str) and len(title) <= NOTICE_INPUT_LIMIT):
+        raise NoticeError(f"title must be at most {NOTICE_INPUT_LIMIT} characters")
+    return title
 
 
 def plain(text: str) -> str:
@@ -96,7 +105,8 @@ def notice_message(notice: ClaudeNotice) -> str:
     text = html.escape(capped(plain(notice.text), NOTICE_TEXT_LIMIT), quote=False)
     mark = NOTICE_MARKS[notice.kind]
     handle = f"<code>{notice.session}</code>"
-    footer = f"{notice.container}{SEPARATOR}{handle}" if notice.container else handle
+    title = html.escape(capped(plain(notice.title or ""), NOTICE_TITLE_LIMIT), quote=False)
+    footer = SEPARATOR.join(part for part in (title, notice.container, handle) if part)
     return f"{heading}\n\n{mark} {text}\n\n{footer}"
 
 

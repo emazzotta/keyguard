@@ -125,6 +125,7 @@ A request expires after 5 minutes. The service keeps open requests in memory onl
 |---|---|
 | `session` | The session's UUID |
 | `container` | Optional: the host label of the container that runs the session |
+| `title` | Optional: the session's title, at most 4000 characters |
 | `text` | 1 to 4000 characters |
 | `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default) |
 
@@ -135,12 +136,12 @@ Claude on dev box
 
 ⏳ Waiting for your OK to push 2 commits.
 
-devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
+Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
 ```
 
 - The heading is bold. It names the caller from how it authenticated (`KEYGUARD_PASSKEY_TOKEN_LABEL` or `KEYGUARD_PASSKEY_IDENTITY_LABEL`), not from the body.
 - The text opens with ⏳ for a prompt and 💬 for a finished reply. It loses control and format characters and stops at 300 characters.
-- The last line holds the container, when the body names one, and the session as code, which a tap copies.
+- The last line holds the title and the container, when the body names them, and the session as code, which a tap copies. The title loses control and format characters like the text and stops at 60 characters.
 
 ## Limits
 
