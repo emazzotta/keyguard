@@ -27,6 +27,8 @@ NOTICE = json.dumps({"session": "4a015f0f-199b-4270-9c06-fecc5d85b976", "contain
                      "text": "Waiting for your OK."}).encode()
 TOKEN_LABEL = "dev box"
 IDENTITY_LABEL = "laptop"
+SWEEP_DEADLINE_SECONDS = 10
+LONG_SWEEP_INTERVAL_SECONDS = 3600
 
 
 class FakePages:
@@ -588,3 +590,42 @@ def test_should_describe_its_settings_without_their_secrets(tmp_path):
 
     assert "request token on, telegram on, heartbeat on" in line
     assert not any(secret in line for secret in (REQUEST_TOKEN, "bot-secret", "push/secret"))
+
+
+class CountingQueue:
+    def __init__(self) -> None:
+        self.sweeps = 0
+        self.swept_twice = threading.Event()
+
+    def sweep(self) -> None:
+        self.sweeps += 1
+        if self.sweeps == 2:
+            self.swept_twice.set()
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_sweep_the_queue_each_interval_until_stopped():
+    queue, stopped = CountingQueue(), threading.Event()
+    thread = threading.Thread(target=service.sweep_until_stopped, args=(queue, stopped, 0.01), daemon=True)
+
+    thread.start()
+    swept = queue.swept_twice.wait(SWEEP_DEADLINE_SECONDS)
+    stopped.set()
+    thread.join(SWEEP_DEADLINE_SECONDS)
+
+    assert swept
+    assert not thread.is_alive()
+
+
+@pytest.mark.spec("docs/service.md#stop-it")
+def test_should_wake_the_sweep_from_its_wait_when_told_to_stop():
+    queue, stopped = CountingQueue(), threading.Event()
+    thread = threading.Thread(target=service.sweep_until_stopped, args=(queue, stopped, LONG_SWEEP_INTERVAL_SECONDS),
+                              daemon=True)
+    thread.start()
+
+    stopped.set()
+    thread.join(SWEEP_DEADLINE_SECONDS)
+
+    assert not thread.is_alive()
+    assert queue.sweeps == 0

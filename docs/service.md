@@ -47,6 +47,21 @@ Without Docker, from a checkout or an installed client:
 KEYGUARD_PASSKEY_STORE=/srv/keyguard-store keyguard-passkey serve
 ```
 
+## Stop It
+
+`SIGTERM` stops the service, and it exits with code 0. `docker stop` and Kubernetes send it. The service:
+
+1. closes its port, so a new connection is refused;
+2. lets each call in progress finish with its normal answer;
+3. stops the expiry sweep and the heartbeat;
+4. exits.
+
+A call is in progress from the moment the service accepts its connection until it has sent the answer. Every call is short: it reads or writes the store or the queue in memory, and answers. No call waits for a person, and a commit to the store is a call like any other, so a stop never cuts one in half.
+
+A request that waits for your approval is an entry in the queue, not a call in progress. The asking machine reads it every 2 seconds, and the page makes its calls before and after you approve, never during. A stop therefore never waits for an approval, and the queue goes with the process, as at any restart ([HTTP API](#http-api)).
+
+The service sets no deadline of its own. A client that opens a connection and sends nothing keeps the stop waiting until the socket timeout of 30 seconds. The platform's kill ends what is left, after 30 seconds by default in Kubernetes.
+
 ## Put It Behind a Proxy
 
 The service trusts one header to name the signed-in user, `Tailscale-User-Login` by default. Every page call that reads or changes the store needs it. So two rules apply:

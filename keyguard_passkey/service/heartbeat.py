@@ -6,7 +6,7 @@ the monitor turns red. The push URL carries the monitor's token and is never log
 from __future__ import annotations
 
 import sys
-import time
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -19,7 +19,7 @@ LOOPBACK: Final = "127.0.0.1"
 ANY_ADDRESS: Final = frozenset({"0.0.0.0", "::", ""})
 
 Fetch = Callable[[str], None]
-Sleep = Callable[[float], None]
+Sleep = Callable[[float], object]
 
 
 def _fetch(url: str) -> None:
@@ -41,17 +41,18 @@ def beat(health_url: str, push_url: str, fetch: Fetch = _fetch) -> bool:
 
 
 class Heartbeat:
-    def __init__(self, health_url: str, push_url: str, fetch: Fetch = _fetch,
-                 sleep: Sleep = time.sleep, interval: float = INTERVAL_SECONDS) -> None:
+    def __init__(self, health_url: str, push_url: str, fetch: Fetch = _fetch, sleep: Sleep | None = None,
+                 interval: float = INTERVAL_SECONDS, stopped: threading.Event | None = None) -> None:
         self.health_url = health_url
         self.push_url = push_url
         self.fetch = fetch
-        self.sleep = sleep
+        self.stopped = threading.Event() if stopped is None else stopped
+        self.sleep: Sleep = self.stopped.wait if sleep is None else sleep
         self.interval = interval
 
     def run(self, beats: int | None = None) -> None:
         count = 0
-        while beats is None or count < beats:
+        while not self.stopped.is_set() and (beats is None or count < beats):
             beat(self.health_url, self.push_url, self.fetch)
             count += 1
             self.sleep(self.interval)
@@ -62,5 +63,5 @@ def health_url(bind: str, port: int) -> str:
     return f"http://{f'[{host}]' if ':' in host else host}:{port}{HEALTH_PATH}"
 
 
-def heartbeat_for(push_url: str, bind: str, port: int) -> Heartbeat | None:
-    return Heartbeat(health_url(bind, port), push_url) if push_url else None
+def heartbeat_for(push_url: str, bind: str, port: int, stopped: threading.Event | None = None) -> Heartbeat | None:
+    return Heartbeat(health_url(bind, port), push_url, stopped=stopped) if push_url else None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import threading
 import urllib.error
 from contextlib import redirect_stderr
 
@@ -17,6 +18,7 @@ from keyguard_passkey.service.heartbeat import (
 
 HEALTH_URL = f"http://127.0.0.1:8080{HEALTH_PATH}"
 PUSH_URL = "http://monitor.example/api/push/secret-token?status=up"
+DEADLINE_SECONDS = 10
 
 
 def failing_on(failing_url: str | None):
@@ -101,3 +103,44 @@ def test_should_push_to_the_configured_url():
     heartbeat = heartbeat_for(PUSH_URL, "0.0.0.0", 8080)
 
     assert (heartbeat.health_url, heartbeat.push_url) == (HEALTH_URL, PUSH_URL)
+
+
+@pytest.mark.spec("docs/service.md#stop-it")
+def test_should_wake_from_the_wait_and_stop_when_told_to():
+    stopped, pushed, fetched = threading.Event(), threading.Event(), []
+
+    def fetch(url: str) -> None:
+        fetched.append(url)
+        if url == PUSH_URL:
+            pushed.set()
+
+    thread = threading.Thread(target=Heartbeat(HEALTH_URL, PUSH_URL, fetch=fetch, stopped=stopped).run, daemon=True)
+    thread.start()
+    assert pushed.wait(DEADLINE_SECONDS)
+
+    stopped.set()
+    thread.join(DEADLINE_SECONDS)
+
+    assert not thread.is_alive()
+    assert fetched == [HEALTH_URL, PUSH_URL]
+
+
+@pytest.mark.spec("docs/service.md#stop-it")
+def test_should_not_beat_when_told_to_stop_before_it_starts():
+    fetched, fetch = failing_on(None)
+    stopped = threading.Event()
+    stopped.set()
+
+    Heartbeat(HEALTH_URL, PUSH_URL, fetch=fetch, stopped=stopped).run(beats=1)
+
+    assert fetched == []
+
+
+@pytest.mark.spec("docs/service.md#stop-it")
+def test_should_share_the_stop_it_is_given_with_the_heartbeat_it_builds():
+    stopped = threading.Event()
+
+    heartbeat = heartbeat_for(PUSH_URL, "0.0.0.0", 8080, stopped)
+
+    assert heartbeat is not None
+    assert heartbeat.stopped is stopped

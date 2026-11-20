@@ -12,7 +12,6 @@ import hashlib
 import json
 import secrets
 import threading
-import time
 from collections.abc import Callable, Iterable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +30,7 @@ from .requests import (
     SlidingWindowLimit,
 )
 from .settings import Settings
+from .shutdown import Background, DrainingServer, shut_down, stop_on_sigterm
 
 JSON_TYPE: Final = "application/json"
 SAME_ORIGIN_FETCH: Final = frozenset({"same-origin", "none"})
@@ -288,7 +288,7 @@ class Handler(BaseHTTPRequestHandler):
 def build_server(settings: Settings, notifier: Notifier | None = None,
                  notice_rate_limit: int = NOTICE_RATE_LIMIT,
                  page_source: pages.PageSource = pages.page,
-                 queue: RequestQueue | None = None) -> ThreadingHTTPServer:
+                 queue: RequestQueue | None = None) -> DrainingServer:
     settings.store.mkdir(parents=True, exist_ok=True)
     handler = type("BoundHandler", (Handler,), {
         "settings": settings,
@@ -298,14 +298,12 @@ def build_server(settings: Settings, notifier: Notifier | None = None,
         "notice_limit": SlidingWindowLimit(notice_rate_limit, RATE_WINDOW_SECONDS),
         "page_source": staticmethod(page_source),
     })
-    server = ThreadingHTTPServer((settings.bind, settings.port), handler)
-    server.daemon_threads = True
-    return server
+    return DrainingServer((settings.bind, settings.port), handler)
 
 
-def sweep_forever(queue: RequestQueue, interval: float = SWEEP_INTERVAL_SECONDS) -> None:
-    while True:
-        time.sleep(interval)
+def sweep_until_stopped(queue: RequestQueue, stopped: threading.Event,
+                        interval: float = SWEEP_INTERVAL_SECONDS) -> None:
+    while not stopped.wait(interval):
         queue.sweep()
 
 
@@ -323,9 +321,10 @@ def serve(settings: Settings) -> None:
     queue = RequestQueue(rate_limit=settings.request_rate_limit)
     server = build_server(settings, queue=queue)
     print(describe(settings, server), flush=True)
-    threading.Thread(target=sweep_forever, args=(queue,), daemon=True).start()
-    heartbeat = heartbeat_for(settings.heartbeat_url, settings.bind, server.server_port)
+    background = Background()
+    background.start(sweep_until_stopped, queue, background.stopped)
+    heartbeat = heartbeat_for(settings.heartbeat_url, settings.bind, server.server_port, background.stopped)
     if heartbeat:
-        threading.Thread(target=heartbeat.run, daemon=True).start()
-    with server:
+        background.start(heartbeat.run)
+    with stop_on_sigterm(lambda: shut_down(server, background)), server:
         server.serve_forever()
