@@ -1,9 +1,9 @@
-"""Relay Claude session pings to Telegram, each headed `Claude on <origin>`, off unless a bot is set.
+"""Relay Claude session pings and keyguard notices to Telegram, off unless a bot is set.
 
-The origin is the label of how the caller authenticated: the request token or the identity header.
-Every message ends with the session marker that the Telegram bot reads from a quoted message. An `answer` carries a
-whole reply, in up to three messages, with a link to the session in the web terminal when one is set. Unlock requests
-send nothing here.
+A ping is headed `Claude on <origin>`, the label of how the caller authenticated: the request token or the identity
+header. A keyguard notice has no heading and opens with its mark. A message with a session ends with the marker that
+the Telegram bot reads from a quoted message. An `answer` carries a whole reply, in up to three messages, with a link to
+the session in the web terminal when one is set.
 """
 from __future__ import annotations
 
@@ -39,6 +39,8 @@ CUT_NOTE: Final = f"{ELLIPSIS} (cut, full answer in the session)"
 NOTE_GAP: Final = "\n\n"
 SEPARATOR: Final = " \u00b7 "
 SHORT_SESSION_LENGTH: Final = 8
+SHORT_SESSION: Final = re.compile(r"[0-9A-Za-z]{8}")
+UUID_LENGTH: Final = 36
 SESSION_MARKER: Final = "[session {short}]"
 PARSE_MODE: Final = "HTML"
 CHAT_PATH: Final = "/chat/"
@@ -48,12 +50,16 @@ class NoticeKind(Enum):
     FINISHED = "finished"
     PROMPT = "prompt"
     ANSWER = "answer"
+    KEYGUARD_WAIT = "keyguard_wait"
+    KEYGUARD_FAILED = "keyguard_failed"
 
 
-NOTICE_KINDS: Final = {kind.value: kind for kind in NoticeKind}
-LINK_LABELS: Final = {NoticeKind.ANSWER: "Open the session in Safari"}
-NOTICE_MARKS: Final = {NoticeKind.FINISHED: "\U0001f4ac", NoticeKind.PROMPT: "\u23f3",
-                      NoticeKind.ANSWER: "\U0001f4ac"}
+POSTED_KINDS: Final = (NoticeKind.FINISHED, NoticeKind.PROMPT, NoticeKind.ANSWER, NoticeKind.KEYGUARD_FAILED)
+NOTICE_KINDS: Final = {kind.value: kind for kind in POSTED_KINDS}
+HEADLESS_KINDS: Final = frozenset({NoticeKind.KEYGUARD_WAIT, NoticeKind.KEYGUARD_FAILED})
+LINK_LABELS: Final = {NoticeKind.ANSWER: "Open the session in Safari", NoticeKind.KEYGUARD_WAIT: "Approve in Safari"}
+NOTICE_MARKS: Final = {NoticeKind.FINISHED: "\U0001f4ac", NoticeKind.PROMPT: "\u23f3", NoticeKind.ANSWER: "\U0001f4ac",
+                      NoticeKind.KEYGUARD_WAIT: "\U0001f510", NoticeKind.KEYGUARD_FAILED: "\u274c\U0001f510"}
 
 Send = Callable[[urllib.request.Request], object]
 Spawn = Callable[..., None]
@@ -70,7 +76,8 @@ def _in_background(function: Callable[..., None], *args: object) -> None:
 
 @dataclass(frozen=True)
 class ClaudeNotice:
-    session: UUID
+    """What one notice says. The session is a UUID, or the 8 characters that an unlock request carries, or nothing."""
+    session: str | None
     container: str | None
     text: str
     origin: str
@@ -87,15 +94,30 @@ class NoticeError(ValueError):
 def parse_notice(payload: object, origin: str) -> ClaudeNotice:
     if not isinstance(payload, dict):
         raise NoticeError("a notice is a JSON object")
-    session, container = payload.get("session"), payload.get("container")
-    if not isinstance(session, str):
-        raise NoticeError("session must be a UUID")
+    container = payload.get("container")
     if container is not None and not (isinstance(container, str) and SAFE_HOST.fullmatch(container)):
         raise NoticeError("container must be a host label")
     kind = parse_kind(payload.get("kind", NoticeKind.FINISHED.value))
+    session = parse_session(payload.get("session"), kind)
     raw = payload.get("text")
     text, cut = parse_answer(raw) if kind is NoticeKind.ANSWER else (parse_text(raw), False)
-    return ClaudeNotice(UUID(session), container, text, origin, kind, parse_title(payload.get("title")), cut=cut)
+    return ClaudeNotice(session, container, text, origin, kind, parse_title(payload.get("title")), cut=cut)
+
+
+def parse_session(session: object, kind: NoticeKind) -> str | None:
+    """A ping names its session by UUID. A failure line may name it by 8 characters, or by none, as the unlock service
+    and the Mac keyguard know a requester that has no Claude session."""
+    failure = kind is NoticeKind.KEYGUARD_FAILED
+    if failure and session is None:
+        return None
+    if isinstance(session, str):
+        if failure and SHORT_SESSION.fullmatch(session):
+            return session
+        try:
+            return str(UUID(session))
+        except ValueError:
+            pass
+    raise NoticeError("session must be a UUID" + (", 8 letters or digits, or left out" if failure else ""))
 
 
 def parse_text(text: object) -> str:
@@ -144,7 +166,7 @@ def notice_messages(notice: ClaudeNotice) -> list[str]:
 
 
 def notice_message(notice: ClaudeNotice) -> str:
-    return _frame(notice, html.escape(capped(plain(notice.text), NOTICE_TEXT_LIMIT), quote=False))
+    return _frame(notice, html.escape(capped(plain(notice.text), NOTICE_TEXT_LIMIT), quote=False), link=_anchor(notice))
 
 
 def answer_room(notice: ClaudeNotice) -> int:
@@ -185,13 +207,26 @@ def _anchor(notice: ClaudeNotice) -> str | None:
 
 
 def _frame(notice: ClaudeNotice, body: str, counter: str = "", link: str | None = None) -> str:
-    origin = html.escape(capped(plain(notice.origin), NOTICE_ORIGIN_LIMIT), quote=False)
+    blocks = [] if notice.kind in HEADLESS_KINDS else [_heading(notice)]
+    blocks.append(f"{NOTICE_MARKS[notice.kind]} {counter}{body}")
+    if link:
+        blocks.append(link)
+    blocks.append(_footer(notice))
+    return "\n\n".join(block for block in blocks if block)
+
+
+def _heading(notice: ClaudeNotice) -> str:
+    return f"<b>Claude on {html.escape(capped(plain(notice.origin), NOTICE_ORIGIN_LIMIT), quote=False)}</b>"
+
+
+def _footer(notice: ClaudeNotice) -> str:
+    """The title, the container and the session's UUID, when each is known, and under them the session marker."""
     title = html.escape(capped(plain(notice.title or ""), NOTICE_TITLE_LIMIT), quote=False)
-    footer = SEPARATOR.join(part for part in (title, notice.container, f"<code>{notice.session}</code>") if part)
-    marker = SESSION_MARKER.format(short=str(notice.session)[:SHORT_SESSION_LENGTH])
-    blocks = [f"<b>Claude on {origin}</b>", f"{NOTICE_MARKS[notice.kind]} {counter}{body}", *([link] if link else []),
-              f"{footer}\n{marker}"]
-    return "\n\n".join(blocks)
+    session = notice.session or ""
+    handle = f"<code>{session}</code>" if len(session) == UUID_LENGTH else ""
+    marker = SESSION_MARKER.format(short=session[:SHORT_SESSION_LENGTH]) if session else ""
+    line = SEPARATOR.join(part for part in (title, notice.container, handle) if part)
+    return "\n".join(part for part in (line, marker) if part)
 
 
 def _describe(error: Exception) -> str:

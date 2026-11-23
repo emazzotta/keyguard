@@ -8,7 +8,6 @@ import urllib.error
 import urllib.request
 from contextlib import redirect_stderr
 from dataclasses import replace as dataclasses_replace
-from uuid import UUID
 
 import pytest
 
@@ -212,14 +211,14 @@ def test_should_end_every_ping_with_the_marker_the_bot_reads_from_a_reply(kind):
 def test_should_flatten_control_and_format_characters_out_of_the_text():
     text = "line one\nline two\u202e\tKeyguard\x07"
 
-    message = notice_message(ClaudeNotice(UUID(SESSION), None, text, "laptop"))
+    message = notice_message(ClaudeNotice(SESSION, None, text, "laptop"))
 
     assert text_of(message) == "line one line two Keyguard"
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_cap_a_long_text_with_an_ellipsis():
-    body = text_of(notice_message(ClaudeNotice(UUID(SESSION), None, "x" * 1000, "laptop")))
+    body = text_of(notice_message(ClaudeNotice(SESSION, None, "x" * 1000, "laptop")))
 
     assert len(body) == NOTICE_TEXT_LIMIT
     assert body.endswith("\u2026")
@@ -227,7 +226,7 @@ def test_should_cap_a_long_text_with_an_ellipsis():
 
 @pytest.mark.spec("docs/service.md")
 def test_should_escape_html_in_the_origin_and_the_text():
-    message = notice_message(ClaudeNotice(UUID(SESSION), None, "<b>1 < 2 & 3 > 2</b>", "<i>laptop</i>"))
+    message = notice_message(ClaudeNotice(SESSION, None, "<b>1 < 2 & 3 > 2</b>", "<i>laptop</i>"))
 
     assert message.splitlines()[0] == "<b>Claude on &lt;i&gt;laptop&lt;/i&gt;</b>"
     assert text_of(message) == "&lt;b&gt;1 &lt; 2 &amp; 3 &gt; 2&lt;/b&gt;"
@@ -235,7 +234,7 @@ def test_should_escape_html_in_the_origin_and_the_text():
 
 @pytest.mark.spec("docs/service.md")
 def test_should_cap_the_text_before_escaping_it_so_no_entity_is_cut():
-    body = text_of(notice_message(ClaudeNotice(UUID(SESSION), None, "&" * 1000, "laptop")))
+    body = text_of(notice_message(ClaudeNotice(SESSION, None, "&" * 1000, "laptop")))
 
     assert body == "&amp;" * (NOTICE_TEXT_LIMIT - 1) + "\u2026"
 
@@ -254,6 +253,13 @@ def test_should_cap_the_text_before_escaping_it_so_no_entity_is_cut():
     notice(kind="question"),
     notice(kind=None),
     notice(kind=["prompt"]),
+    notice(kind="keyguard_wait"),
+    notice(kind="finished", session="4a015f0f"),
+    notice(kind="answer", session=None),
+    notice(kind="keyguard_failed", session="4a015f0"),
+    notice(kind="keyguard_failed", session="4a015f0f!"),
+    notice(kind="keyguard_failed", session=7),
+    notice(kind="keyguard_failed", session="not-a-uuid"),
     notice(title=7),
     notice(title=["x"]),
     notice(title="x" * (NOTICE_INPUT_LIMIT + 1)),
@@ -542,3 +548,57 @@ def test_should_report_a_failed_part_without_its_text_and_send_the_rest():
 
     assert counters(sent) == ["(1/3)", "(3/3)"]
     assert stderr.getvalue() == "telegram: message 2 of 3 not sent (HTTP 429)\n"
+
+
+FAILED_MARK = "\u274c\U0001f510"
+SHORT = "4a015f0f"
+
+
+def failure(**over: object) -> dict[str, object]:
+    return {"kind": "keyguard_failed", "text": "Request expired with no answer.", **over}
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("session", "kept"), [(SHORT, SHORT), (SESSION, SESSION), (SESSION.upper(), SESSION), (None, None)])
+def test_should_take_a_failure_line_with_a_session_by_uuid_or_by_8_characters_or_with_none(session, kept):
+    assert parse_notice(failure(session=session), ORIGIN).session == kept
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_take_a_failure_line_with_no_session_field_at_all():
+    assert parse_notice(failure(), ORIGIN).session is None
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_open_a_failure_line_with_its_mark_and_no_heading():
+    message = notice_message(parse_notice(failure(session=SHORT, container="box-1", title="Plan"), ORIGIN))
+
+    assert message.splitlines() == [f"{FAILED_MARK} Request expired with no answer.", "", "Plan \u00b7 box-1",
+                                    "[session 4a015f0f]"]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_show_the_session_handle_of_a_failure_line_only_for_a_full_uuid():
+    short = notice_message(parse_notice(failure(session=SHORT), ORIGIN))
+    full = notice_message(parse_notice(failure(session=SESSION), ORIGIN))
+
+    assert "<code>" not in short
+    assert full.splitlines()[-2:] == [f"<code>{SESSION}</code>", "[session 4a015f0f]"]
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("over", "message"), [
+    ({}, f"{FAILED_MARK} Request expired with no answer."),
+    ({"container": "box-1"}, f"{FAILED_MARK} Request expired with no answer.\n\nbox-1"),
+])
+def test_should_end_a_failure_line_without_a_session_where_its_text_or_footer_ends(over, message):
+    assert notice_message(parse_notice(failure(**over), ORIGIN)) == message
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_post_the_failure_line_of_a_caller_to_the_chat():
+    sent: list[urllib.request.Request] = []
+
+    notifier(sent.append).claude_notice(parse_notice(failure(session=SHORT), ORIGIN))
+
+    assert json.loads(sent[0].data)["text"] == f"{FAILED_MARK} Request expired with no answer.\n\n[session 4a015f0f]"
