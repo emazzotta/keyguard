@@ -152,11 +152,13 @@ Claude on dev box
 ⏳ Waiting for your OK to push 2 commits.
 
 Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
+[session 4a015f0f]
 ```
 
 - The heading is bold. It names the caller from how it authenticated (`KEYGUARD_PASSKEY_TOKEN_LABEL` or `KEYGUARD_PASSKEY_IDENTITY_LABEL`), not from the body.
 - The text opens with ⏳ for a prompt and 💬 for a finished reply. It loses control and format characters and stops at 300 characters.
-- The last line holds the title and the container, when the body names them, and the session as code, which a tap copies. The title loses control and format characters like the text and stops at 60 characters.
+- The line above the marker holds the title and the container, when the body names them, and the session as code, which a tap copies. The title loses control and format characters like the text and stops at 60 characters.
+- The last line is the marker: `[session `, the first 8 characters of the session, `]`. The Telegram bot reads it from the message that a reply quotes, so a reply to any ping goes to its session.
 
 ## Limits
 

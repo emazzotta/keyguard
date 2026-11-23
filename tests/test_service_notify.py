@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import html
 import io
 import json
+import re
 import urllib.error
 import urllib.request
 from contextlib import redirect_stderr
@@ -27,6 +29,7 @@ SESSION = "4a015f0f-199b-4270-9c06-fecc5d85b976"
 ORIGIN = "dev box"
 SPEECH_BALLOON = "\U0001f4ac"
 HOURGLASS = "\u23f3"
+BOT_MARKER = re.compile(r"^\[session ([0-9A-Za-z]{8})\]\s*\Z", re.MULTILINE)
 
 
 def run_inline(function, *args):
@@ -51,6 +54,14 @@ def text_line(message: str) -> str:
 
 def text_of(message: str) -> str:
     return text_line(message).split(" ", 1)[1]
+
+
+def footer_line(message: str) -> str:
+    return message.splitlines()[-2]
+
+
+def as_telegram_shows(message: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", message))
 
 
 @pytest.mark.spec("docs/service.md")
@@ -124,21 +135,22 @@ def test_should_head_the_text_with_the_origin_and_end_with_container_and_session
 
     assert json.loads(sent[0].data)["text"] == (
         f"<b>Claude on dev box</b>\n\n{SPEECH_BALLOON} Waiting for your OK.\n\n"
-        f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>")
+        f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>\n[session 4a015f0f]")
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_leave_out_the_container_when_the_notice_has_none():
     message = notice_message(parse_notice(notice(container=None), "laptop"))
 
-    assert message == f"<b>Claude on laptop</b>\n\n{SPEECH_BALLOON} Waiting for your OK.\n\n<code>{SESSION}</code>"
+    assert message == (f"<b>Claude on laptop</b>\n\n{SPEECH_BALLOON} Waiting for your OK.\n\n<code>{SESSION}</code>"
+                       "\n[session 4a015f0f]")
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_put_the_title_before_container_and_session():
     message = notice_message(parse_notice(notice(title="Telegram alert layout"), ORIGIN))
 
-    assert message.splitlines()[-1] == (
+    assert footer_line(message) == (
         f"Telegram alert layout \u00b7 devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>")
 
 
@@ -147,14 +159,14 @@ def test_should_put_the_title_before_container_and_session():
 def test_should_leave_out_a_missing_or_blank_title(title):
     message = notice_message(parse_notice(notice(**title), ORIGIN))
 
-    assert message.splitlines()[-1] == f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>"
+    assert footer_line(message) == f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>"
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_cap_the_title_before_escaping_it():
     message = notice_message(parse_notice(notice(title="<i>" + "x" * 100, container=None), ORIGIN))
 
-    assert message.splitlines()[-1] == (
+    assert footer_line(message) == (
         "&lt;i&gt;" + "x" * (NOTICE_TITLE_LIMIT - 4) + f"\u2026 \u00b7 <code>{SESSION}</code>")
 
 
@@ -168,6 +180,18 @@ def test_should_open_the_text_with_the_mark_of_its_kind(kind, mark):
     message = notice_message(parse_notice(notice(**kind), "laptop"))
 
     assert text_line(message) == f"{mark} Waiting for your OK."
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("kind", ["finished", "prompt"])
+def test_should_end_every_ping_with_the_marker_the_bot_reads_from_a_reply(kind):
+    message = notice_message(parse_notice(notice(kind=kind, title="<b>Plan</b> & more"), ORIGIN))
+
+    found = BOT_MARKER.search(as_telegram_shows(message))
+
+    assert found is not None
+    assert found.group(1) == SESSION[:8]
+    assert message.splitlines()[-1] == "[session 4a015f0f]"
 
 
 @pytest.mark.spec("docs/service.md")

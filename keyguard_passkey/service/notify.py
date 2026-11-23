@@ -27,6 +27,8 @@ NOTICE_INPUT_LIMIT: Final = 4000
 NOTICE_TITLE_LIMIT: Final = 60
 ELLIPSIS: Final = "\u2026"
 SEPARATOR: Final = " \u00b7 "
+SHORT_SESSION_LENGTH: Final = 8
+SESSION_MARKER: Final = "[session {short}]"
 PARSE_MODE: Final = "HTML"
 
 
@@ -107,7 +109,8 @@ def notice_message(notice: ClaudeNotice) -> str:
     handle = f"<code>{notice.session}</code>"
     title = html.escape(capped(plain(notice.title or ""), NOTICE_TITLE_LIMIT), quote=False)
     footer = SEPARATOR.join(part for part in (title, notice.container, handle) if part)
-    return f"{heading}\n\n{mark} {text}\n\n{footer}"
+    marker = SESSION_MARKER.format(short=str(notice.session)[:SHORT_SESSION_LENGTH])
+    return f"{heading}\n\n{mark} {text}\n\n{footer}\n{marker}"
 
 
 def _describe(error: Exception) -> str:
