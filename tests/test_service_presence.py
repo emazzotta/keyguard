@@ -24,8 +24,10 @@ def stamped(age: float, kind: str) -> str:
     ([stamped(FRESH_SECONDS + 500, "phone")], Presence.AWAY),
     ([stamped(500, "computer"), stamped(5, "phone")], Presence.PHONE),
     ([stamped(500, "computer"), stamped(500, "phone")], Presence.AWAY),
-    ([f"{NOW - 30.5} computer"], Presence.COMPUTER),
     ([f"  {int(NOW)} phone \n"], Presence.PHONE),
+    ([f"{int(NOW)}\tphone"], Presence.PHONE),
+    ([f"{int(NOW)}   computer"], Presence.COMPUTER),
+    ([stamped(10, "phone")] * 3, Presence.PHONE),
     ([stamped(-1000, "computer")], Presence.COMPUTER),
 ])
 def test_should_take_the_kind_of_the_fresh_lines_computer_before_phone(lines, expected):
@@ -39,8 +41,8 @@ ARABIC_FRESH = "".join(chr(0x0660 + int(digit)) for digit in FRESH)
 @pytest.mark.spec("docs/service.md")
 @pytest.mark.parametrize("line", [
     "", "garbage", FRESH, f"{FRESH} tablet", f"x {FRESH} computer", f"-{FRESH} computer", f"{FRESH} computer extra",
-    f"{FRESH}  computer", f"{FRESH}\tcomputer", f"{FRESH}.5.0 computer", f"{FRESH * 3} computer", f"0x{FRESH} computer",
-    f"{ARABIC_FRESH} computer", f"{FRESH}\u00a0computer", f"{FRESH} Computer", f"{FRESH}. computer",
+    f"{FRESH}.5 computer", f"{FRESH}.5.0 computer", f"{FRESH * 3} computer", f"0x{FRESH} computer",
+    f"{ARABIC_FRESH} computer", f"{FRESH} Computer", f"{FRESH}. computer",
 ])
 def test_should_ignore_a_line_that_does_not_parse(line):
     assert classify([line, stamped(10, "phone")], NOW) == Presence.PHONE
@@ -91,6 +93,35 @@ def test_should_skip_what_is_not_a_readable_file(tmp_path):
     (tmp_path / "folder-with-a-name-like-a-file").mkdir()
     (tmp_path / "bad").write_bytes(b"\xff\xfe\x00 not text")
     (tmp_path / "good").write_text(stamped(10, "phone"))
+
+    assert read_presence(tmp_path, NOW) == Presence.PHONE
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_skip_a_dot_named_file_and_count_a_normal_file_beside_it(tmp_path):
+    (tmp_path / ".terminal-a.tmp").write_text(stamped(1, "computer") + "\n")
+    (tmp_path / ".hidden").write_text(stamped(1, "computer") + "\n")
+    (tmp_path / "terminal-b").write_text(stamped(1, "phone") + "\n")
+
+    assert read_presence(tmp_path, NOW) == Presence.PHONE
+    (tmp_path / "terminal-b").unlink()
+    assert read_presence(tmp_path, NOW) == Presence.AWAY
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_count_a_file_that_vanished_since_the_listing_as_no_line(tmp_path, monkeypatch):
+    (tmp_path / "kept").write_text(stamped(1, "phone") + "\n")
+    listed = [tmp_path / "gone", tmp_path / "kept"]
+    monkeypatch.setattr(Path, "iterdir", lambda self: iter(listed))
+
+    assert read_presence(tmp_path, NOW) == Presence.PHONE
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_merge_the_lines_of_several_files_and_repeated_lines(tmp_path):
+    (tmp_path / "a").write_text(stamped(500, "computer") + "\n" + stamped(5, "phone") + "\n")
+    (tmp_path / "b").write_text(stamped(5, "phone") + "\n" + stamped(5, "phone") + "\n")
+    (tmp_path / "c").write_text(stamped(500, "computer") + "\n")
 
     assert read_presence(tmp_path, NOW) == Presence.PHONE
 
