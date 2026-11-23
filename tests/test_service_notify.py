@@ -12,9 +12,12 @@ from uuid import UUID
 
 import pytest
 
+from keyguard_passkey.service import notify
 from keyguard_passkey.service.longtext import MESSAGE_LIMIT, utf16_length
 from keyguard_passkey.service.notify import (
-    ANSWER_TEXT_LIMIT,
+    ANSWER_HARD_LIMIT,
+    ANSWER_WINDOW,
+    CUT_NOTE,
     NOTICE_INPUT_LIMIT,
     NOTICE_TEXT_LIMIT,
     NOTICE_TITLE_LIMIT,
@@ -22,6 +25,7 @@ from keyguard_passkey.service.notify import (
     DisabledNotifier,
     NoticeKind,
     TelegramNotifier,
+    answer_room,
     notice_message,
     notice_messages,
     parse_notice,
@@ -290,10 +294,27 @@ def counters(messages: list[str]) -> list[str]:
 
 
 @pytest.mark.spec("docs/service.md")
-def test_should_parse_an_answer_with_the_text_of_the_whole_reply():
-    parsed = parse_notice(answer(text="x" * ANSWER_TEXT_LIMIT), ORIGIN)
+def test_should_take_an_answer_of_the_hard_limit_and_keep_only_what_three_messages_can_show():
+    parsed = parse_notice(answer(text="x" * ANSWER_HARD_LIMIT), ORIGIN)
 
-    assert (parsed.kind, len(parsed.text)) == (NoticeKind.ANSWER, ANSWER_TEXT_LIMIT)
+    assert (parsed.kind, len(parsed.text), parsed.cut) == (NoticeKind.ANSWER, ANSWER_WINDOW, True)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_a_short_answer_whole_and_uncut():
+    parsed = parse_notice(answer(text="One.\n\nTwo."), ORIGIN)
+
+    assert (parsed.text, parsed.cut) == ("One.\n\nTwo.", False)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_redact_no_more_of_an_answer_than_it_can_send(monkeypatch):
+    scanned: list[int] = []
+    monkeypatch.setattr(notify, "scrub", lambda text: scanned.append(len(text)) or text)
+
+    parse_notice(answer(text="1" * ANSWER_HARD_LIMIT), ORIGIN)
+
+    assert scanned == [ANSWER_WINDOW]
 
 
 @pytest.mark.spec("docs/service.md")
@@ -305,15 +326,14 @@ def test_should_keep_the_old_limit_for_the_other_kinds():
 
 @pytest.mark.spec("docs/service.md")
 @pytest.mark.parametrize("text", [
-    "x" * (ANSWER_TEXT_LIMIT + 1),
-    PARTY * (ANSWER_TEXT_LIMIT // 2 + 1),
-    "bot1:a " * 1000,
+    "x" * (ANSWER_HARD_LIMIT + 1),
+    PARTY * (ANSWER_HARD_LIMIT + 1),
     "",
     " \n\t" + chr(0x200B) + "\n",
     7,
     None,
 ])
-def test_should_refuse_an_answer_that_is_blank_or_over_the_limit(text):
+def test_should_refuse_an_answer_that_is_blank_or_over_the_hard_limit(text):
     with pytest.raises(ValueError):
         parse_notice(answer(text=text), ORIGIN)
 
@@ -385,9 +405,11 @@ def test_should_cut_an_answer_between_paragraphs_when_it_can():
 @pytest.mark.spec("docs/service.md")
 @pytest.mark.parametrize("body", [
     "\n\n".join("p" * 2490 for _ in range(3)),
-    "x" * ANSWER_TEXT_LIMIT,
-    PARTY * (ANSWER_TEXT_LIMIT // 2),
-    "&" * ANSWER_TEXT_LIMIT,
+    "x" * ANSWER_HARD_LIMIT,
+    PARTY * (ANSWER_HARD_LIMIT // 2),
+    "&" * ANSWER_HARD_LIMIT,
+    "line\n" * 20_000,
+    paragraphs(60),
     "line\n" * 1500,
     three_parts(),
     paragraphs(5),
@@ -403,19 +425,59 @@ def test_should_fit_the_longest_answer_in_three_messages_whatever_its_shape(body
     assert all(shown_units(message) <= MESSAGE_LIMIT for message in messages)
 
 
+def room_of_an_answer() -> int:
+    return answer_room(parse_notice(answer(), ORIGIN))
+
+
 @pytest.mark.spec("docs/service.md")
-def test_should_end_the_third_message_with_an_ellipsis_rather_than_send_a_fourth():
-    huge = ClaudeNotice(UUID(SESSION), None, paragraphs(40, 1500), ORIGIN, NoticeKind.ANSWER)
+def test_should_send_an_answer_that_fills_three_messages_exactly_without_a_note():
+    messages = messages_of(answer(text="x" * (3 * room_of_an_answer())))
 
-    messages = notice_messages(huge)
-
-    assert len(messages) == 3
-    assert text_of_last_body(messages[-1]).endswith("\u2026")
+    assert counters(messages) == ["(1/3)", "(2/3)", "(3/3)"]
+    assert not any(CUT_NOTE in message for message in messages)
     assert all(shown_units(message) <= MESSAGE_LIMIT for message in messages)
 
 
-def text_of_last_body(message: str) -> str:
-    return message.rsplit("\n\n", 1)[0]
+@pytest.mark.spec("docs/service.md")
+def test_should_end_an_answer_that_is_one_unit_over_three_messages_with_the_note_and_the_link():
+    link = f"{TERMINAL}/chat/{SESSION}"
+    cut = with_session_link(parse_notice(answer(text="x" * (3 * room_of_an_answer() + 1), title="Plan"), ORIGIN),
+                            TERMINAL)
+
+    first, second, third = notice_messages(cut)
+
+    assert CUT_NOTE not in first and CUT_NOTE not in second
+    assert third.splitlines()[-6:] == [
+        CUT_NOTE, "", f'<a href="{link}">Open the session in Safari</a>', "",
+        f"Plan \u00b7 devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f]"]
+    assert all(shown_units(message) <= MESSAGE_LIMIT for message in (first, second, third))
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_marker_on_the_last_line_of_every_message_of_a_cut_answer():
+    messages = messages_of(answer(text=paragraphs(60)))
+
+    assert counters(messages) == ["(1/3)", "(2/3)", "(3/3)"]
+    assert [message.splitlines()[-1] for message in messages] == ["[session 4a015f0f]"] * 3
+    assert [CUT_NOTE in message for message in messages] == [False, False, True]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_cut_a_long_answer_at_a_paragraph_boundary_when_it_can():
+    messages = messages_of(answer(text=paragraphs(60)))
+
+    shown = "".join(as_telegram_shows(message) for message in messages)
+    sizes = {len(line) for line in shown.splitlines() if line[:4].isdigit() and " w" in line[:7]}
+    assert sizes == {1480}
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_note_the_cut_of_an_answer_that_redaction_shrank_to_one_message():
+    messages = messages_of(answer(text=(FAKE_TOKEN + " ") * 600))
+
+    message, = messages
+    assert CUT_NOTE in message and "(1/1)" not in message
+    assert "AAFakeScrubber" not in message
 
 
 @pytest.mark.spec("docs/service.md")

@@ -14,7 +14,7 @@ import pytest
 
 from keyguard_passkey.pages import CSS, HTML, JAVASCRIPT, Page
 from keyguard_passkey.service import server as service
-from keyguard_passkey.service.notify import ClaudeNotice
+from keyguard_passkey.service.notify import ANSWER_HARD_LIMIT, ANSWER_WINDOW, ClaudeNotice
 from keyguard_passkey.service.settings import DEFAULT_IDENTITY_HEADER, Requester, Settings
 from keyguard_passkey.store import Store
 
@@ -586,14 +586,26 @@ def test_should_relay_an_answer_without_a_link_when_no_web_terminal_is_set(tmp_p
 
 
 @pytest.mark.spec("docs/service.md")
-@pytest.mark.parametrize("text", ["x" * 7501, " ", "bot1:a " * 1000])
-def test_should_refuse_an_answer_that_is_empty_or_over_the_limit(notified, text):
+@pytest.mark.parametrize("text", ["x" * (ANSWER_HARD_LIMIT + 1), " "])
+def test_should_refuse_an_answer_that_is_empty_or_over_the_hard_limit(notified, text):
     served, notifier = notified
 
     status = served.status("/notify", "POST", BEARER, notice_body(kind="answer", text=text))
 
     assert status == HTTPStatus.BAD_REQUEST
     assert notifier.notices == []
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("length", "cut"), [(ANSWER_HARD_LIMIT, True), (ANSWER_WINDOW + 1, True), (1000, False)])
+def test_should_relay_a_long_answer_cut_instead_of_refusing_it(notified, length, cut):
+    served, notifier = notified
+
+    status = served.status("/notify", "POST", BEARER, notice_body(kind="answer", text="x" * length))
+
+    assert status == HTTPStatus.ACCEPTED
+    notice, = notifier.notices
+    assert notice.cut is cut
 
 
 @pytest.mark.spec("docs/service.md")

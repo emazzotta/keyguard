@@ -142,7 +142,7 @@ A request expires after 5 minutes. The service keeps open requests in memory onl
 | `session` | The session's UUID |
 | `container` | Optional: the host label of the container that runs the session |
 | `title` | Optional: the session's title, at most 4000 characters |
-| `text` | 1 to 4000 characters, for `answer` 1 to 7500 |
+| `text` | 1 to 4000 characters, for `answer` 1 to 100000 |
 | `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default), `answer` for the whole text of a reply (see Answers) |
 
 The service answers `202` and sends in the background, `400` for any other body, and `429` past 20 pings a minute. It writes the message itself in Telegram HTML and escapes each value, so a caller cannot add a line or a tag:
@@ -163,19 +163,23 @@ Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc
 
 ### Answers
 
-`kind` `answer` sends the whole text of a reply, not a one-line ping, with the same body and the same `202`, `400` and `429`. It differs in six points:
+`kind` `answer` sends the text of a whole reply, not a one-line ping, with the same body and the same `202`, `400` and `429`. It differs in six points:
 
-- `text` may have 7500 characters, and a character outside the Basic Multilingual Plane, such as an emoji, counts 2. The service answers `400` above the limit, and again when the text it sends is above it: redacting a token can lengthen a text.
+- `text` may have 100000 characters, and the service answers `400` above that: the limit only guards the service. A text of more than three messages is not refused: the service sends the start of it and ends the last message with the note `… (cut, full answer in the session)`, above the link and the footer. A text that fits in three messages has no note.
 - It keeps the line breaks, with one blank line at most between two paragraphs, and escapes `<`, `>` and `&`.
-- It replaces each string that looks like a Telegram bot token with `[redacted]`. This is the pattern of the bot's `src/token_scrubber.py`: the two copies must change together.
-- It splits a text of more than one message at a blank line, a line break or a space in the last quarter of a message, else in the middle of a line, into at most 3 messages of at most 4096 characters, as Telegram counts them after it parses the HTML. Each message has the heading, a counter such as `(2/3)` after the mark, the footer and the marker, so a reply to any of them continues the session. When the text still does not fit in three messages (a very long title or heading), the third message ends with `…`.
+- It replaces each string that looks like a Telegram bot token with `[redacted]`. This is the pattern of the bot's `src/token_scrubber.py`: the two copies must change together. The service scans only the first 12800 characters, which is more than three messages show, since the pattern is slow on a very long run of digits.
+- It splits the text at a blank line, a line break or a space in the last quarter of a message, else in the middle of a line, into at most 3 messages of at most 4096 characters, as Telegram counts them after it parses the HTML. Each message has the heading, a counter such as `(2/3)` after the mark, the footer and the marker, so a reply to any of them continues the session.
 - When `KEYGUARD_PASSKEY_TERMINAL_URL` is set, the last message has the link `Open the session in Safari` to `<origin>/chat/<session>`, above the footer. The service builds the link from that setting and the session. A `link` field in the body is ignored. Telegram's own browser cannot use a passkey, hence Safari.
 - The messages go one after the other from one background thread. A message that Telegram refuses is logged as `telegram: message 2 of 3 not sent (HTTP 429)`, without its text, and the next one is still sent.
+
+A reply of more than three messages ends like this:
 
 ```
 Claude on dev box
 
-💬 (2/2) ...the rest of the reply.
+💬 (3/3) ...the last paragraph that fitted.
+
+… (cut, full answer in the session)
 
 Open the session in Safari
 
