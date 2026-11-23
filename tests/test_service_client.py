@@ -12,6 +12,8 @@ from conftest import REQUEST_TOKEN, REQUESTER, ed25519_keypair, opened, sealed_t
 
 from keyguard_passkey.service import client, requests
 from keyguard_passkey.service.client import Caller, Cancelled, RequestGone, Signer, UnlockError, UnlockTimeout
+from keyguard_passkey.service.hint import NotifyHint
+from keyguard_passkey.service.presence import Presence
 
 BEARER = {"Authorization": f"Bearer {REQUEST_TOKEN}"}
 PAGE_VECTORS = Path(__file__).parent / "unlock-core-vectors.json"
@@ -407,3 +409,28 @@ def test_should_name_a_tool_missing_from_the_path(monkeypatch):
 
     with pytest.raises(UnlockError, match="needs age-keygen on PATH"):
         client.generate_ephemeral()
+
+
+def test_should_post_the_hint_beside_the_signed_body(monkeypatch, signer):
+    posted: list[dict[str, object]] = []
+    monkeypatch.setattr(client, "_send", lambda request: posted.append(json.loads(request.data)) or b'{"id": "r1"}')
+    request = client.request_for(signer, ["A"], client.generate_ephemeral().recipient)
+    hint = NotifyHint(Presence.AWAY, "box-1")
+
+    client.submit("http://127.0.0.1:1", BEARER, request, hint)
+    client.submit("http://127.0.0.1:1", BEARER, request)
+
+    with_hint, without = posted
+    assert with_hint["notify"] == {"presence": "away", "container": "box-1"}
+    assert {name: value for name, value in with_hint.items() if name != "notify"} == without
+    assert "notify" not in without
+
+
+def test_should_keep_a_signature_valid_when_the_request_carries_a_hint(unlock_service, signer):
+    request = client.request_for(signer, ["A"], client.generate_ephemeral().recipient)
+
+    record = unlock_service.approver_view(
+        client.submit(unlock_service.base, BEARER, request, NotifyHint(Presence.COMPUTER, "box-1")))
+
+    assert unlock_service.signature_holds(record)
+    assert "notify" not in record and "hint" not in record

@@ -19,6 +19,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Final
 
+from .hint import HINT_FIELD, NotifyHint
 from .requests import HIDDEN_TITLE_CATEGORIES, MAX_TITLE_CHARS, SESSION_ID
 
 DEFAULT_TIMEOUT_SECONDS: Final = 300
@@ -208,8 +209,10 @@ def _get(url: str, headers: dict[str, str]) -> bytes | None:
         raise
 
 
-def submit(base_url: str, headers: dict[str, str], request: UnlockRequest) -> str:
-    raw = _send(urllib.request.Request(f"{base_url}/requests", data=serialize(request.payload()), method="POST",
+def submit(base_url: str, headers: dict[str, str], request: UnlockRequest, hint: NotifyHint | None = None) -> str:
+    """Posts the request. The hint travels beside the signed body, never in it: the signature does not cover it."""
+    payload = request.payload() if hint is None else {**request.payload(), HINT_FIELD: hint.wire()}
+    raw = _send(urllib.request.Request(f"{base_url}/requests", data=serialize(payload), method="POST",
                                        headers={"Content-Type": "application/json", **headers}))
     request_id = _json_object(raw).get("id")
     if not isinstance(request_id, str) or not request_id:

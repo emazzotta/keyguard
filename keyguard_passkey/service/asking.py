@@ -8,6 +8,7 @@ import contextlib
 import re
 import signal
 import sys
+import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import Final, TextIO
 from ..ceremony import Op, Request
 from . import client, pending
 from .client import Caller, Signer, UnlockError
+from .hint import NotifyHint, clean_container
+from .presence import Presence, read_presence
 
 APPROVE_PATH: Final = "/approve"
 ENROLL_PATH: Final = "/enroll"
@@ -59,6 +62,9 @@ class ServiceAsk:
     remote_recipient: str
     pending_dir: Path
     pane: str | None = None
+    presence_dir: Path | None = None
+    container: str = ""
+    now: Callable[[], float] = time.time
     cancelled: Callable[[], bool] = lambda: False
     stderr: TextIO = sys.stderr
     timeout: float = client.DEFAULT_TIMEOUT_SECONDS
@@ -94,6 +100,11 @@ class ServiceAsk:
         session = client.caller(request.session, request.title).session
         if session:
             pending.clear_expired(self.pending_dir, session)
+
+    def _hint(self) -> NotifyHint:
+        """Where the owner sits, for the notices of this request: unknown without a presence folder to read."""
+        presence = read_presence(self.presence_dir, self.now()) if self.presence_dir else Presence.UNKNOWN
+        return NotifyHint(presence=presence, container=clean_container(self.container))
 
     @property
     def _signer(self) -> Signer:
@@ -134,7 +145,7 @@ class ServiceAsk:
 
     def _answer(self, request: client.UnlockRequest, names: list[str], op: Op, asking: Caller) -> str:
         with sigterm_cancels() as terminated:
-            request_id = client.submit(self.url, self.headers, request)
+            request_id = client.submit(self.url, self.headers, request, self._hint())
             record = pending.Request(id=request_id, vars=tuple(names), op=op.value, host=self.requester,
                                      link=self.approve_link(request_id), session=asking.session or None,
                                      title=asking.title or None, pane=self.pane)

@@ -17,10 +17,13 @@ SIGNING_KEY_ENV: Final = "KEYGUARD_PASSKEY_SIGNING_KEY"
 TOKEN_FILE_ENV: Final = "KEYGUARD_PASSKEY_REQUEST_TOKEN_FILE"
 REMOTE_RECIPIENT_ENV: Final = "KEYGUARD_PASSKEY_REMOTE_RECIPIENT"
 PENDING_ENV: Final = "KEYGUARD_PASSKEY_PENDING_DIR"
+PRESENCE_ENV: Final = "KEYGUARD_PASSKEY_PRESENCE_DIR"
+CONTAINER_ENV: Final = "KEYGUARD_CONTAINER"
 SIGNING_KEY_FILE: Final = "sign.key"
 TOKEN_FILE: Final = "request-token"
 REMOTE_RECIPIENT_FILE: Final = "remote-recipient"
 PENDING_FOLDER: Final = "pending"
+PRESENCE_FOLDER: Final = (".claude", "presence")
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -45,6 +48,10 @@ def pending_folder(environ: Mapping[str, str], state: Path) -> Path:
     return Path(environ[PENDING_ENV]).expanduser() if environ.get(PENDING_ENV) else state / PENDING_FOLDER
 
 
+def presence_folder(environ: Mapping[str, str]) -> Path:
+    return Path(environ[PRESENCE_ENV]).expanduser() if environ.get(PRESENCE_ENV) else Path.home().joinpath(*PRESENCE_FOLDER)
+
+
 def connect(args: argparse.Namespace, environ: Mapping[str, str], config: Path, state: Path,
             stderr: TextIO) -> ServiceAsk:
     def chosen(flag: object, name: str, default: Path) -> Path:
@@ -59,6 +66,8 @@ def connect(args: argparse.Namespace, environ: Mapping[str, str], config: Path, 
         remote_recipient=recipient.strip(),
         pending_dir=pending_folder(environ, state),
         pane=asking_pane(environ),
+        presence_dir=presence_folder(environ),
+        container=environ.get(CONTAINER_ENV, "").strip(),
         stderr=stderr,
     )
 

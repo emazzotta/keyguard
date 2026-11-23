@@ -13,6 +13,8 @@ from conftest import REQUEST_TOKEN, REQUESTER, opened
 from keyguard_passkey.ceremony import Op, Request
 from keyguard_passkey.service import asking, client, pending
 from keyguard_passkey.service.asking import ServiceAsk, UsageError
+from keyguard_passkey.service.hint import NotifyHint
+from keyguard_passkey.service.presence import Presence
 
 SESSION = "48f92bcb"
 TITLE = "Keyguard approval session names"
@@ -244,3 +246,46 @@ def test_should_settle_a_sessions_expired_requests_once_the_hold_answers_it(make
                                             ("", {})])
 def test_should_send_the_request_token_only_when_there_is_one(make_ask, token, headers):
     assert make_ask(token=token).headers == headers
+
+
+NOW = 1_000_000.0
+
+
+def test_should_hint_unknown_presence_when_it_has_no_presence_folder(make_ask):
+    assert make_ask(container="box-1")._hint() == NotifyHint(Presence.UNKNOWN, "box-1")
+
+
+@pytest.mark.parametrize(("lines", "presence"), [
+    ([f"{int(NOW) - 5} computer"], Presence.COMPUTER),
+    ([f"{int(NOW) - 5} phone"], Presence.PHONE),
+    ([f"{int(NOW) - 500} computer"], Presence.AWAY),
+])
+def test_should_hint_the_presence_that_its_folder_shows_at_the_time_of_asking(make_ask, tmp_path, lines, presence):
+    folder = tmp_path / "presence"
+    folder.mkdir()
+    (folder / "terminal").write_text("\n".join(lines) + "\n")
+
+    assert make_ask(presence_dir=folder, now=lambda: NOW)._hint().presence == presence
+
+
+def test_should_hint_unknown_when_the_presence_folder_is_missing(make_ask, tmp_path):
+    assert make_ask(presence_dir=tmp_path / "absent", now=lambda: NOW)._hint().presence == Presence.UNKNOWN
+
+
+@pytest.mark.parametrize(("label", "container"), [("devbox-1", "devbox-1"), ("", None), ("dev box", None)])
+def test_should_hint_a_container_only_when_it_is_a_host_label(make_ask, label, container):
+    assert make_ask(container=label)._hint().container == container
+
+
+def test_should_send_the_hint_with_the_request(make_ask, monkeypatch, tmp_path):
+    folder = tmp_path / "presence"
+    folder.mkdir()
+    (folder / "terminal").write_text(f"{int(time.time())} phone\n")
+    sent: list[client.NotifyHint | None] = []
+    submit = client.submit
+    monkeypatch.setattr(client, "submit", lambda *args: sent.append(args[3]) or submit(*args))
+    ask = make_ask(lambda record: {"A": "one"}, presence_dir=folder, container="box-1")
+
+    ask(request(Op.GET, ["A"]))
+
+    assert sent == [NotifyHint(Presence.PHONE, "box-1")]

@@ -94,3 +94,18 @@ def test_should_refuse_a_token_file_it_cannot_read(tmp_path):
 
     with pytest.raises(UsageError, match="cannot read"):
         connected(tmp_path, {}, "--service", URL, "--token-file", str(folder))
+
+
+def test_should_read_the_presence_folder_from_the_variable_else_the_claude_folder_of_the_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+
+    default = connected(tmp_path, {}, "--service", URL).presence_dir
+    chosen = connected(tmp_path, {connection.PRESENCE_ENV: str(tmp_path / "elsewhere")}, "--service", URL).presence_dir
+
+    assert (default, chosen) == (tmp_path / "home" / ".claude" / "presence", tmp_path / "elsewhere")
+
+
+def test_should_take_the_container_label_from_its_variable_and_none_without_it(tmp_path):
+    named = connected(tmp_path, {connection.CONTAINER_ENV: " devbox-7f7d78d989-tgd9t "}, "--service", URL)
+
+    assert (named.container, connected(tmp_path, {}, "--service", URL).container) == ("devbox-7f7d78d989-tgd9t", "")
