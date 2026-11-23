@@ -194,6 +194,23 @@ Each web terminal instance writes a file in `~/.claude/presence/`, with one line
 - Until the Mac's web terminal writes the folder, every read is `unknown`, so every read asks the phone at once.
 - The same rules live in `keyguard_server/presence.py`, keyguard-passkey (`service/presence.py`) and the dotfiles (`bin/presence.py`): change all three together.
 
+#### Failure reports
+
+A failed secret read sends one line to Telegram. The unlock service posts `❌🔐` itself when a phone request that reached it expires, and its 300 s expiry comes before the server's 345 s deadline. The server posts only when no phone request exists for the failure (`keyguard_server/failure_report.py`):
+
+| Outcome | Who posts | Why |
+|---|---|---|
+| Touch ID or the phone approves | nobody | the read worked |
+| You cancel Touch ID (exit 2), or refuse or cancel on the phone | nobody | your own no |
+| The phone request reached the service and expired unanswered, or its client hung until the server's deadline | unlock service | it holds the request |
+| The read failed at the Mac and the phone client could not reach the service or start | the server | no request exists |
+| The read failed at the Mac and the phone fallback is off | the server | no request exists |
+
+- The server tells a request that reached the service from one that did not by the client's `Approve on your phone:` line on stderr, which the client prints only after the service accepted the request. The client's exit code cannot tell them apart (3 means both).
+- The text names how many variables the read asked for and never one of them: `Keyguard read of 2 variables failed at the Mac, and the phone request never reached the unlock service.` The server sends it to `KEYGUARD_STORE_URL` + `/notify` as kind `keyguard_failed` (the service adds `❌🔐`) with title `Mac keyguard` and the caller's session id. It sends no credential: the unlock service takes the Mac's tailnet identity, as it does for the phone client.
+- Sending never changes a read. It runs in a background thread after the read has ended. A failed post is logged to stderr without its text (`failure report not sent (HTTP 429)`), is never retried and changes neither the HTTP answer nor the exit status. Without `KEYGUARD_STORE_URL` nothing is sent.
+- Known gaps: a phone request that the service loses (a service restart) and a phone answer that arrives but cannot be used end the read without a line. A client that hangs until the deadline without ever printing its approve line is silent too. Only reads of secrets (`GET /<NAMES>`) are reported, not key lists, writes or bridge consent.
+
 ## Bridge endpoints
 
 The bridge lets you expose whitelisted Mac commands over HTTP. A Docker container can trigger a Spotify pause, send a system notification, or call any script you pre-approve — without SSH, without scripting on the host, and without exposing arbitrary command execution.

@@ -159,7 +159,7 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         """Touch ID alone, or raced against the phone once the Mac has the phone client installed."""
         client = phone.configured()
         if client is None:
-            return keyguard_cli.get(*keys, cache_duration=cache_duration, caller=self._caller.label)
+            return phone.touch_id_alone(keys, self._caller, cache_duration=cache_duration)
         return phone.race(keys, self._caller, client, cache_duration=cache_duration)
 
     # ---- Bridge handler ----

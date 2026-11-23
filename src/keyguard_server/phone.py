@@ -5,7 +5,8 @@ behind the store (KEYGUARD_STORE_URL), where the web terminal and the phone can 
 at once when nobody sits at a web terminal (presence.py reads that once, when the race starts), else only
 once `Timing.delay` passes without an answer. The first answer wins and the other side is stopped;
 the client withdraws its request on SIGTERM. A Touch ID cancel is a no and ends the read, while a
-failing client never ends a prompt someone may still answer.
+failing client never ends a prompt someone may still answer. A read that fails with no phone request behind it is
+reported once (failure_report.py).
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from . import encoding, keyguard_cli, presence
+from . import encoding, failure_report, keyguard_cli, presence
 from .caller import Caller
 from .config import (
     PHONE_CLIENT,
@@ -33,6 +34,7 @@ from .config import (
     PHONE_WAIT,
     SUBPROCESS_TIMEOUT,
 )
+from .failure_report import ReadFailure, Reason
 from .keyguard_cli import CliResult
 from .presence import Presence
 
@@ -41,6 +43,7 @@ _PANE_ENV = "TMUX_PANE"
 _SESSION_ENV = "KEYGUARD_SESSION"
 _TITLE_ENV = "KEYGUARD_TITLE"
 _HOLD_ENV = "KEYGUARD_PASSKEY_HOLD_SECONDS"
+_REQUEST_SENT = "Approve on your phone:"
 
 
 class Side(Enum):
@@ -61,8 +64,9 @@ DEFAULT_TIMING = Timing()
 
 @dataclass(frozen=True)
 class Outside:
-    """What the race asks beyond its two processes, so a test can answer in its place."""
+    """What a read asks or tells beyond its two processes, so a test can stand in for both."""
     presence_reader: Callable[[], Presence] = presence.current
+    report_failure: Callable[[ReadFailure], None] = failure_report.report
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,20 @@ def parse_exports(stdout: str, keys: list[str]) -> dict[str, str] | None:
 def ends_read(touch_id: CliResult) -> bool:
     """Touch ID settles the read when it gave the values or the owner cancelled the prompt."""
     return touch_id.ok or touch_id.touch_id_cancelled
+
+
+def reached_service(phone: CliResult) -> bool:
+    """The client prints its approve link once the unlock service holds the request, which its exit code cannot say."""
+    return _REQUEST_SENT in phone.stderr
+
+
+def touch_id_alone(keys: list[str], caller: Caller, cache_duration: int | None = None,
+                   outside: Outside = Outside()) -> CliResult:
+    """The read while the phone fallback is off: no phone request exists, so a failure is reported from here."""
+    result = keyguard_cli.get(*keys, cache_duration=cache_duration, caller=caller.label)
+    if not ends_read(result):
+        outside.report_failure(ReadFailure(Reason.PHONE_OFF, len(keys), caller.session))
+    return result
 
 
 def race(keys: list[str], caller: Caller, client: PhoneClient, cache_duration: int | None = None,
@@ -178,6 +196,7 @@ class _Race:
         self._touch_id = _Child(Side.TOUCH_ID, keyguard_cli.command(prompt), None, self._exits,
                                 timing.touch_id_timeout)
         self._phone_delay = timing.delay if outside.presence_reader().attended else 0.0
+        self._report_failure = outside.report_failure
         self._phone: _Child | None = None
         self._touch_id_failure: CliResult | None = None
         self._phone_failure: CliResult | None = None
@@ -233,6 +252,8 @@ class _Race:
     def _both_failed(self) -> CliResult:
         touch_id, phone = self._touch_id_failure, self._phone_failure
         assert touch_id is not None and phone is not None
+        if not reached_service(phone):
+            self._report_failure(ReadFailure(Reason.NOT_REACHED, len(self._keys), self._caller.session))
         return CliResult(rc=touch_id.rc, stdout="", stderr=f"{touch_id.stderr.strip()}; phone: {phone.stderr.strip()}",
                          timed_out=touch_id.timed_out)
 

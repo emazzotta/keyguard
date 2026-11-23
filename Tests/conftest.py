@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import http.client
+import json
+import socket
 import sys
 import threading
-from http.server import HTTPServer, ThreadingHTTPServer
+import time
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,7 +18,7 @@ import pytest
 # Make src/keyguard_server importable
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from keyguard_server import bridge, cache, consent  # noqa: E402
+from keyguard_server import bridge, cache, consent, failure_report  # noqa: E402
 from keyguard_server.handler import KeyguardHandler  # noqa: E402
 from keyguard_server.keyguard_cli import CliResult  # noqa: E402
 
@@ -40,6 +45,77 @@ def reset_state():
     cache.clear()
     yield
     cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def failure_reports_stay_on_this_machine(monkeypatch):
+    """KEYGUARD_STORE_URL is set on the Mac that runs the suite: a test's failed read must never post to its service."""
+    monkeypatch.setattr(failure_report, "PHONE_SERVICE", "")
+
+
+def eventually(condition: Callable[[], bool], seconds: float = 3.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()
+
+
+# ---------------------------------------------------------------------------
+# Stand-in unlock service
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Post:
+    path: str
+    headers: dict[str, str]
+    body: dict[str, str]
+
+
+@dataclass
+class UnlockService:
+    url: str
+    posts: list[Post] = field(default_factory=list)
+    status: int = 202
+    gate: threading.Event = field(default_factory=threading.Event)
+
+    def arrived(self, count: int = 1) -> bool:
+        return eventually(lambda: len(self.posts) >= count)
+
+
+@pytest.fixture()
+def unlock_service() -> Iterator[UnlockService]:
+    """Records each POST it gets, answers with `status`, and holds each answer until `gate` is set."""
+    service = UnlockService(url="")
+    service.gate.set()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            service.posts.append(Post(self.path, {k.lower(): v for k, v in self.headers.items()}, json.loads(raw)))
+            service.gate.wait(10)
+            self.send_response(service.status)
+            self.end_headers()
+
+        def log_message(self, fmt: str, *args: object) -> None:
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    service.url = f"http://127.0.0.1:{srv.server_address[1]}"
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield service
+    service.gate.set()
+    srv.shutdown()
+
+
+@pytest.fixture()
+def dead_service_url() -> str:
+    """An address where nothing listens, so a connection is refused at once."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return f"http://127.0.0.1:{probe.getsockname()[1]}"
 
 
 # ---------------------------------------------------------------------------
