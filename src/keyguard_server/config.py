@@ -37,6 +37,7 @@ PHONE_SIGNING_KEY: Final = _path_from_env("KEYGUARD_PHONE_SIGNING_KEY")
 PHONE_SERVICE: Final = os.environ.get("KEYGUARD_STORE_URL", "")
 PHONE_REQUESTER: Final = "mac"
 PHONE_DELAY: Final = 15
+PRESENCE_DIR: Final = Path(os.environ.get("KEYGUARD_PRESENCE_DIR") or "~/.claude/presence").expanduser()
 # The client's 10 s request plus its 300 s wait for an answer, with a margin.
 PHONE_WAIT: Final = 330
 # The client checks for SIGTERM between its 2 s polls, then withdraws its request.

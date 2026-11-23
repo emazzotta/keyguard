@@ -170,7 +170,7 @@ The server only accepts connections from localhost and Docker's internal network
 
 ### Phone fallback
 
-A read can also be approved on the phone, for when nobody is at the Mac. The Touch ID prompt shows at once. If nobody answers it within 15 s, the server also runs the [keyguard-passkey](https://github.com/emazzotta/keyguard-passkey) client as requester `mac`. The client posts a signed request to the unlock service that holds the store (`KEYGUARD_STORE_URL`), and the web terminal and the phone's approve page can release it with a passkey. A client in tmux sends its pane in `X-Keyguard-Pane` (`%6`), which the server hands the client as `TMUX_PANE`, so the web terminal's sheet can show the shell or session that asks. The first answer wins: Touch ID's ends the client, which withdraws its request, and the phone's closes the Touch ID prompt. Only your own Cancel at the Mac is a no and ends the read (`keyguard` exits 2). A prompt that ends any other way asks the phone at once: a locked screen ends it after about 27 s (exit 3), and no fingerprint sensor with the lid closed fails it at once (exit 1). An unanswered prompt on an unlocked screen never ends by itself, so the server ends it after 60 s and keeps waiting for the phone. A failing client leaves the Touch ID prompt up. A read now waits up to 345 s.
+A read can also be approved on the phone, for when nobody is at the Mac. The Touch ID prompt shows at once. If nobody sits at a web terminal, the server also runs the [keyguard-passkey](https://github.com/emazzotta/keyguard-passkey) client as requester `mac` at once. If someone does, it waits 15 s for an answer to the prompt first ([Presence](#presence)). The client posts a signed request to the unlock service that holds the store (`KEYGUARD_STORE_URL`), and the web terminal and the phone's approve page can release it with a passkey. A client in tmux sends its pane in `X-Keyguard-Pane` (`%6`), which the server hands the client as `TMUX_PANE`, so the web terminal's sheet can show the shell or session that asks. The first answer wins: Touch ID's ends the client, which withdraws its request, and the phone's closes the Touch ID prompt. Only your own Cancel at the Mac is a no and ends the read (`keyguard` exits 2). A prompt that ends any other way asks the phone at once: a locked screen ends it after about 27 s (exit 3), and no fingerprint sensor with the lid closed fails it at once (exit 1). An unanswered prompt on an unlocked screen never ends by itself, so the server ends it after 60 s and keeps waiting for the phone. A failing client leaves the Touch ID prompt up. A read waits up to 345 s.
 
 It is off until `KEYGUARD_STORE_URL` is set and both files exist:
 
@@ -178,6 +178,21 @@ It is off until `KEYGUARD_STORE_URL` is set and both files exist:
 - The Mac's Ed25519 signing key at `$KEYGUARD_PHONE_SIGNING_KEY` (default `~/.keyguard/mac-sign.key`, mode 0600). Back it up in keyguard as `MAC_SIGN`, and pin its public half once on each approving browser at `/approve?pin=mac`.
 
 The client needs Homebrew's `age` and `openssl@3` (LibreSSL lacks `pkeyutl -rawin`). The Mac must be signed in to Tailscale as the store's user, since the unlock service takes the Mac's tailnet identity in place of a request token.
+
+#### Presence
+
+Each web terminal instance writes a file in `~/.claude/presence/`, with one line per page in view: `<epoch-seconds> <computer|phone>`. `KEYGUARD_PRESENCE_DIR` in the server's environment moves the folder; `make install` does not bake it into the launchd plist, so a moved folder needs an entry under the plist's `EnvironmentVariables`. The server reads the folder once per read, when the race starts:
+
+| Presence | Meaning | The phone is asked |
+|---|---|---|
+| `computer` or `phone` | a line younger than 120 s: someone is at a web terminal | after 15 s |
+| `away` | the folder holds no fresh line | at once |
+| `unknown` | the folder is missing or unreadable | at once |
+
+- `computer` wins over `phone` when both are fresh. A line dated in the future is fresh. A bad line, a dot-named file and a file that vanishes while it is read count as no line.
+- Touch ID shows at once in every case. Presence only decides when the phone is asked too.
+- Until the Mac's web terminal writes the folder, every read is `unknown`, so every read asks the phone at once.
+- The same rules live in `keyguard_server/presence.py`, keyguard-passkey (`service/presence.py`) and the dotfiles (`bin/presence.py`): change all three together.
 
 ## Bridge endpoints
 

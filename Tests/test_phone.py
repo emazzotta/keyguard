@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 from conftest import http_get
 
-from keyguard_server import keyguard_cli, phone
+from keyguard_server import keyguard_cli, phone, presence
 from keyguard_server.caller import Caller
 from keyguard_server.keyguard_cli import CliResult
+from keyguard_server.presence import Presence
 
 FAST = phone.Timing(delay=0.3, deadline=5.0, touch_id_timeout=5.0, stop_grace=2.0)
 NOBODY = Caller()
@@ -31,6 +32,16 @@ def logged(events: Path, text: str, seconds: float = 3.0) -> bool:
             return True
         time.sleep(0.05)
     return False
+
+
+@pytest.fixture(autouse=True)
+def owner_at_a_web_terminal(tmp_path, monkeypatch) -> None:
+    """Every race reads the real presence folder unless a test says otherwise: pin it to a page in view. The line
+    is dated far ahead, which counts as fresh whatever the clock says."""
+    folder = tmp_path / "presence"
+    folder.mkdir()
+    (folder / "web-terminal").write_text("999999999999 computer\n")
+    monkeypatch.setattr(presence, "PRESENCE_DIR", folder)
 
 
 @pytest.fixture()
@@ -161,6 +172,88 @@ def test_should_keep_waiting_on_touch_id_when_the_phone_client_cannot_start(touc
     result = phone.race(["A"], NOBODY, missing, timing=FAST)
 
     assert (result.ok, result.stdout) == (True, "secret")
+
+
+# ---- Presence ----
+
+DELAY = 2.0
+SEEN_AT_ONCE = [Presence.AWAY, Presence.UNKNOWN]
+SEEN_AFTER_THE_DELAY = [Presence.COMPUTER, Presence.PHONE]
+
+
+def sitting(seen: Presence) -> phone.Outside:
+    return phone.Outside(presence_reader=lambda: seen)
+
+
+def timed_race(client: phone.PhoneClient, outside: phone.Outside) -> tuple[CliResult, float]:
+    started = time.monotonic()
+    result = phone.race(["A", "B"], NOBODY, client, timing=phone.Timing(delay=DELAY, deadline=30.0),
+                        outside=outside)
+    return result, time.monotonic() - started
+
+
+@pytest.mark.parametrize("seen", SEEN_AT_ONCE)
+def test_should_ask_the_phone_at_once_when_nobody_sits_at_a_web_terminal(touch_id, client, events, seen):
+    touch_id(f"echo shown >> {events}; {WAIT_FOR_SIGNAL}")
+
+    result, elapsed = timed_race(client(EXPORTS_A_B), sitting(seen))
+
+    assert result.ok
+    assert elapsed < DELAY
+    assert logged(events, "shown")
+
+
+@pytest.mark.parametrize("seen", SEEN_AFTER_THE_DELAY)
+def test_should_keep_the_delay_before_asking_the_phone_when_someone_sits_at_a_web_terminal(touch_id, client, seen):
+    touch_id(WAIT_FOR_SIGNAL)
+
+    result, elapsed = timed_race(client(EXPORTS_A_B), sitting(seen))
+
+    assert result.ok
+    assert elapsed >= DELAY
+
+
+@pytest.mark.parametrize("seen", SEEN_AFTER_THE_DELAY)
+def test_should_not_ask_the_phone_when_touch_id_answers_within_the_delay_while_someone_sits_at_a_web_terminal(
+        touch_id, client, events, seen):
+    touch_id("sleep 0.5; printf secret")
+
+    result = phone.race(["A"], NOBODY, client(f"echo started >> {events}"),
+                        timing=phone.Timing(delay=DELAY, deadline=30.0), outside=sitting(seen))
+
+    assert (result.ok, result.stdout) == (True, "secret")
+    time.sleep(0.3)
+    assert not events.exists()
+
+
+def test_should_read_the_presence_once_per_read(touch_id, client):
+    touch_id(WAIT_FOR_SIGNAL)
+    reads: list[Presence] = []
+
+    def reader() -> Presence:
+        reads.append(Presence.AWAY)
+        return Presence.AWAY
+
+    phone.race(["A", "B"], NOBODY, client(f"sleep 0.5; {EXPORTS_A_B}"), timing=FAST,
+               outside=phone.Outside(presence_reader=reader))
+
+    assert len(reads) == 1
+
+
+def test_should_read_the_presence_folder_by_default(touch_id, client, tmp_path, monkeypatch):
+    touch_id(WAIT_FOR_SIGNAL)
+    monkeypatch.setattr(presence, "PRESENCE_DIR", tmp_path / "no-such-folder")
+    started = time.monotonic()
+
+    result = phone.race(["A", "B"], NOBODY, client(EXPORTS_A_B),
+                        timing=phone.Timing(delay=DELAY, deadline=30.0))
+
+    assert result.ok
+    assert time.monotonic() - started < DELAY
+
+
+def test_should_wait_fifteen_seconds_for_touch_id_by_default():
+    assert phone.DEFAULT_TIMING.delay == 15
 
 
 # ---- The client's command line and answer ----

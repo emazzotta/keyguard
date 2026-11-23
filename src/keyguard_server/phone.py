@@ -1,8 +1,9 @@
 """The phone fallback for a secret read, raced against the Touch ID prompt.
 
-Touch ID shows at once. Unless someone answers it within `Timing.delay`, the keyguard-passkey client that
-`make install` copies also asks the unlock service behind the store (KEYGUARD_STORE_URL), where the
-web terminal and the phone can approve the read. The first answer wins and the other side is stopped;
+Touch ID shows at once. The keyguard-passkey client that `make install` copies also asks the unlock service
+behind the store (KEYGUARD_STORE_URL), where the web terminal and the phone can approve the read. It asks
+at once when nobody sits at a web terminal (presence.py reads that once, when the race starts), else only
+once `Timing.delay` passes without an answer. The first answer wins and the other side is stopped;
 the client withdraws its request on SIGTERM. A Touch ID cancel is a no and ends the read, while a
 failing client never ends a prompt someone may still answer.
 """
@@ -14,11 +15,12 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from . import encoding, keyguard_cli
+from . import encoding, keyguard_cli, presence
 from .caller import Caller
 from .config import (
     PHONE_CLIENT,
@@ -32,6 +34,7 @@ from .config import (
     SUBPROCESS_TIMEOUT,
 )
 from .keyguard_cli import CliResult
+from .presence import Presence
 
 _EXPORT = "export"
 _PANE_ENV = "TMUX_PANE"
@@ -54,6 +57,12 @@ class Timing:
 
 
 DEFAULT_TIMING = Timing()
+
+
+@dataclass(frozen=True)
+class Outside:
+    """What the race asks beyond its two processes, so a test can answer in its place."""
+    presence_reader: Callable[[], Presence] = presence.current
 
 
 @dataclass(frozen=True)
@@ -107,8 +116,8 @@ def ends_read(touch_id: CliResult) -> bool:
 
 
 def race(keys: list[str], caller: Caller, client: PhoneClient, cache_duration: int | None = None,
-         timing: Timing = DEFAULT_TIMING) -> CliResult:
-    return _Race(keys, caller, client, cache_duration, timing).run()
+         timing: Timing = DEFAULT_TIMING, outside: Outside = Outside()) -> CliResult:
+    return _Race(keys, caller, client, cache_duration, timing, outside).run()
 
 
 @dataclass(frozen=True)
@@ -158,7 +167,7 @@ class _Child:
 
 class _Race:
     def __init__(self, keys: list[str], caller: Caller, client: PhoneClient, cache_duration: int | None,
-                 timing: Timing) -> None:
+                 timing: Timing, outside: Outside) -> None:
         self._keys = keys
         self._caller = caller
         self._client = client
@@ -168,6 +177,7 @@ class _Race:
         prompt = keyguard_cli.get_args(*keys, cache_duration=cache_duration, caller=caller.label)
         self._touch_id = _Child(Side.TOUCH_ID, keyguard_cli.command(prompt), None, self._exits,
                                 timing.touch_id_timeout)
+        self._phone_delay = timing.delay if outside.presence_reader().attended else 0.0
         self._phone: _Child | None = None
         self._touch_id_failure: CliResult | None = None
         self._phone_failure: CliResult | None = None
@@ -193,7 +203,7 @@ class _Race:
         return self._on_phone(ended.result)
 
     def _until_due(self) -> float:
-        due = self._timing.delay if self._phone is None else self._timing.deadline
+        due = self._phone_delay if self._phone is None else self._timing.deadline
         return max(0.0, self._started + due - time.monotonic())
 
     def _on_due(self) -> CliResult | None:
