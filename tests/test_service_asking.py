@@ -150,6 +150,16 @@ def test_should_record_an_expiry_when_nobody_answers_in_time(make_ask):
     assert [record["state"] for record in recorded(ask)] == ["expired"]
 
 
+def test_should_leave_the_request_open_when_its_own_wait_runs_out_so_the_service_sees_the_expiry(
+        make_ask, unlock_service):
+    ask = make_ask(timeout=QUICK_TIMEOUT)
+
+    with pytest.raises(client.UnlockTimeout):
+        ask(request(Op.GET, ["A"]))
+
+    assert not withdrawn(unlock_service, ask.stderr.seen[0]["id"])
+
+
 def test_should_record_an_expiry_when_the_service_drops_the_request(make_ask, unlock_service):
     ask = make_ask(lambda record: unlock_service.call(f"/r/{record['id']}", "DELETE") and None)
 

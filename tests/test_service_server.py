@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from keyguard_passkey.pages import CSS, HTML, JAVASCRIPT, Page
+from keyguard_passkey.service import client
 from keyguard_passkey.service import server as service
 from keyguard_passkey.service.notify import ANSWER_HARD_LIMIT, ANSWER_WINDOW, ClaudeNotice, NoticeKind
 from keyguard_passkey.service.settings import DEFAULT_IDENTITY_HEADER, Requester, Settings
@@ -26,6 +27,7 @@ SESSION = "4a015f0f-199b-4270-9c06-fecc5d85b976"
 TERMINAL_URL = "https://terminal.example"
 PUBLIC_URL = "https://unlock.example"
 REQUEST_TTL = 300
+POLL_INTERVAL = 5
 COMMIT_BODY = json.dumps({"files": {"index.age": base64.b64encode(b"x").decode()}}).encode()
 NOTICE = json.dumps({"session": SESSION, "container": "f635a28c3a2e", "text": "Waiting for your OK."}).encode()
 TOKEN_LABEL = "dev box"
@@ -129,8 +131,11 @@ class Clock:
     def __call__(self) -> float:
         return self.now
 
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
     def pass_the_time_to_expiry(self) -> None:
-        self.now += REQUEST_TTL + 1
+        self.advance(REQUEST_TTL + 1)
 
 
 @pytest.fixture
@@ -611,6 +616,22 @@ def test_should_post_the_failure_line_when_a_request_is_read_after_it_expired_in
     status = served.status(f"/r/{request_id}", headers=BEARER)
 
     assert status == HTTPStatus.NOT_FOUND
+    assert [notice.kind for notice in notifier.notices] == [NoticeKind.KEYGUARD_FAILED]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_post_the_failure_line_once_for_a_client_that_waited_the_whole_time_to_live_and_gave_up(timed):
+    served, notifier, clock, queue = timed
+    request_id = served.create(notify={"presence": "phone"})
+    notifier.notices.clear()
+
+    with pytest.raises(client.UnlockTimeout):
+        client.poll(served.base, BEARER, request_id, timeout=REQUEST_TTL, interval=POLL_INTERVAL, now=clock,
+                    sleep=clock.advance)
+    queue.sweep()
+    clock.advance(service.SWEEP_INTERVAL_SECONDS)
+    queue.sweep()
+
     assert [notice.kind for notice in notifier.notices] == [NoticeKind.KEYGUARD_FAILED]
 
 
