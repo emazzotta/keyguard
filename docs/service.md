@@ -91,6 +91,7 @@ Another proxy needs the same behaviour, and `KEYGUARD_PASSKEY_IDENTITY_HEADER` s
 | `KEYGUARD_PASSKEY_REQUEST_RATE_LIMIT` | New requests per minute | `30` |
 | `KEYGUARD_PASSKEY_HEARTBEAT_URL` | A push monitor URL, called each minute while `/healthz` answers | off |
 | `KEYGUARD_PASSKEY_TELEGRAM_BOT_TOKEN`, `KEYGUARD_PASSKEY_TELEGRAM_CHAT_ID` | Relay the notices posted to `/notify` to a Telegram chat | off |
+| `KEYGUARD_PASSKEY_TERMINAL_URL` | The origin of the web terminal, `https://host` with an optional port and no path: an `answer` ping ends with a link to `<origin>/chat/<session>` | off: no link |
 | `KEYGUARD_PASSKEY_TOKEN_LABEL`, `KEYGUARD_PASSKEY_IDENTITY_LABEL` | How a notice names a caller with the token or with the header | `token client`, `signed-in device` |
 
 `serve` prints the settings it runs with, without the secrets.
@@ -141,8 +142,8 @@ A request expires after 5 minutes. The service keeps open requests in memory onl
 | `session` | The session's UUID |
 | `container` | Optional: the host label of the container that runs the session |
 | `title` | Optional: the session's title, at most 4000 characters |
-| `text` | 1 to 4000 characters |
-| `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default) |
+| `text` | 1 to 4000 characters, for `answer` 1 to 7500 |
+| `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default), `answer` for the whole text of a reply (see Answers) |
 
 The service answers `202` and sends in the background, `400` for any other body, and `429` past 20 pings a minute. It writes the message itself in Telegram HTML and escapes each value, so a caller cannot add a line or a tag:
 
@@ -155,10 +156,32 @@ Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc
 [session 4a015f0f]
 ```
 
-- The heading is bold. It names the caller from how it authenticated (`KEYGUARD_PASSKEY_TOKEN_LABEL` or `KEYGUARD_PASSKEY_IDENTITY_LABEL`), not from the body.
+- The heading is bold. It names the caller from how it authenticated (`KEYGUARD_PASSKEY_TOKEN_LABEL` or `KEYGUARD_PASSKEY_IDENTITY_LABEL`), not from the body, and stops at 60 characters.
 - The text opens with ⏳ for a prompt and 💬 for a finished reply. It loses control and format characters and stops at 300 characters.
 - The line above the marker holds the title and the container, when the body names them, and the session as code, which a tap copies. The title loses control and format characters like the text and stops at 60 characters.
 - The last line is the marker: `[session `, the first 8 characters of the session, `]`. The Telegram bot reads it from the message that a reply quotes, so a reply to any ping goes to its session.
+
+### Answers
+
+`kind` `answer` sends the whole text of a reply, not a one-line ping, with the same body and the same `202`, `400` and `429`. It differs in six points:
+
+- `text` may have 7500 characters, and a character outside the Basic Multilingual Plane, such as an emoji, counts 2. The service answers `400` above the limit, and again when the text it sends is above it: redacting a token can lengthen a text.
+- It keeps the line breaks, with one blank line at most between two paragraphs, and escapes `<`, `>` and `&`.
+- It replaces each string that looks like a Telegram bot token with `[redacted]`. This is the pattern of the bot's `src/token_scrubber.py`: the two copies must change together.
+- It splits a text of more than one message at a blank line, a line break or a space in the last quarter of a message, else in the middle of a line, into at most 3 messages of at most 4096 characters, as Telegram counts them after it parses the HTML. Each message has the heading, a counter such as `(2/3)` after the mark, the footer and the marker, so a reply to any of them continues the session. When the text still does not fit in three messages (a very long title or heading), the third message ends with `…`.
+- When `KEYGUARD_PASSKEY_TERMINAL_URL` is set, the last message has the link `Open the session in Safari` to `<origin>/chat/<session>`, above the footer. The service builds the link from that setting and the session. A `link` field in the body is ignored. Telegram's own browser cannot use a passkey, hence Safari.
+- The messages go one after the other from one background thread. A message that Telegram refuses is logged as `telegram: message 2 of 3 not sent (HTTP 429)`, without its text, and the next one is still sent.
+
+```
+Claude on dev box
+
+💬 (2/2) ...the rest of the reply.
+
+Open the session in Safari
+
+Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
+[session 4a015f0f]
+```
 
 ## Limits
 

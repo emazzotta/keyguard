@@ -22,13 +22,18 @@ VAR = "vars/" + "a" * 64 + ".age"
 AUTH = {DEFAULT_IDENTITY_HEADER: "owner@example.com"}
 REQUEST_TOKEN = "requester-test-token"
 BEARER = {"Authorization": f"Bearer {REQUEST_TOKEN}"}
+SESSION = "4a015f0f-199b-4270-9c06-fecc5d85b976"
+TERMINAL_URL = "https://terminal.example"
 COMMIT_BODY = json.dumps({"files": {"index.age": base64.b64encode(b"x").decode()}}).encode()
-NOTICE = json.dumps({"session": "4a015f0f-199b-4270-9c06-fecc5d85b976", "container": "f635a28c3a2e",
-                     "text": "Waiting for your OK."}).encode()
+NOTICE = json.dumps({"session": SESSION, "container": "f635a28c3a2e", "text": "Waiting for your OK."}).encode()
 TOKEN_LABEL = "dev box"
 IDENTITY_LABEL = "laptop"
 SWEEP_DEADLINE_SECONDS = 10
 LONG_SWEEP_INTERVAL_SECONDS = 3600
+
+
+def notice_body(**fields: object) -> bytes:
+    return json.dumps({"session": SESSION, "text": "Waiting for your OK.", **fields}).encode()
 
 
 class FakePages:
@@ -110,7 +115,8 @@ def tokenless(tmp_path):
 def notified(tmp_path):
     notifier = RecordingNotifier()
     served = Running(tmp_path, notifier=notifier, settings={
-        "request_token": REQUEST_TOKEN, "token_label": TOKEN_LABEL, "identity_label": IDENTITY_LABEL})
+        "request_token": REQUEST_TOKEN, "token_label": TOKEN_LABEL, "identity_label": IDENTITY_LABEL,
+        "terminal_url": TERMINAL_URL})
     yield served, notifier
     served.server.shutdown()
 
@@ -544,6 +550,50 @@ def test_should_relay_a_notice_named_by_how_its_sender_authenticated(notified, h
     notice, = notifier.notices
     assert (str(notice.session), notice.container, notice.text, notice.origin) == (
         "4a015f0f-199b-4270-9c06-fecc5d85b976", "f635a28c3a2e", "Waiting for your OK.", origin)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_link_an_answer_to_its_session_from_the_service_settings(notified):
+    served, notifier = notified
+
+    status = served.status("/notify", "POST", BEARER, notice_body(kind="answer"))
+
+    assert status == HTTPStatus.ACCEPTED
+    notice, = notifier.notices
+    assert notice.link == f"{TERMINAL_URL}/chat/{SESSION}"
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_ignore_a_link_in_the_body_of_a_notice(notified):
+    served, notifier = notified
+
+    served.status("/notify", "POST", BEARER, notice_body(kind="answer", link="https://evil.example/x"))
+    served.status("/notify", "POST", BEARER, notice_body(kind="finished", link="https://evil.example/x"))
+
+    assert [notice.link for notice in notifier.notices] == [f"{TERMINAL_URL}/chat/{SESSION}", None]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_relay_an_answer_without_a_link_when_no_web_terminal_is_set(tmp_path):
+    notifier = RecordingNotifier()
+    served = Running(tmp_path, notifier=notifier, settings={"request_token": REQUEST_TOKEN})
+    try:
+        status = served.status("/notify", "POST", BEARER, notice_body(kind="answer"))
+    finally:
+        served.server.shutdown()
+
+    assert (status, [notice.link for notice in notifier.notices]) == (HTTPStatus.ACCEPTED, [None])
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("text", ["x" * 7501, " ", "bot1:a " * 1000])
+def test_should_refuse_an_answer_that_is_empty_or_over_the_limit(notified, text):
+    served, notifier = notified
+
+    status = served.status("/notify", "POST", BEARER, notice_body(kind="answer", text=text))
+
+    assert status == HTTPStatus.BAD_REQUEST
+    assert notifier.notices == []
 
 
 @pytest.mark.spec("docs/service.md")

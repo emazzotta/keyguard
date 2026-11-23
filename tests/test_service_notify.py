@@ -7,21 +7,28 @@ import re
 import urllib.error
 import urllib.request
 from contextlib import redirect_stderr
+from dataclasses import replace as dataclasses_replace
 from uuid import UUID
 
 import pytest
 
+from keyguard_passkey.service.longtext import MESSAGE_LIMIT, utf16_length
 from keyguard_passkey.service.notify import (
+    ANSWER_TEXT_LIMIT,
     NOTICE_INPUT_LIMIT,
     NOTICE_TEXT_LIMIT,
     NOTICE_TITLE_LIMIT,
     ClaudeNotice,
     DisabledNotifier,
+    NoticeKind,
     TelegramNotifier,
     notice_message,
+    notice_messages,
     parse_notice,
     telegram_notifier,
+    with_session_link,
 )
+from keyguard_passkey.service.scrub import REDACTED
 
 TOKEN = "123456:bot-secret"
 CHAT = "4242"
@@ -29,6 +36,9 @@ SESSION = "4a015f0f-199b-4270-9c06-fecc5d85b976"
 ORIGIN = "dev box"
 SPEECH_BALLOON = "\U0001f4ac"
 HOURGLASS = "\u23f3"
+PARTY = chr(0x1F389)
+FAKE_TOKEN = "987654321:AAFakeScrubberTestSecret01234567-_x"
+TERMINAL = "https://terminal.example.test"
 BOT_MARKER = re.compile(r"^\[session ([0-9A-Za-z]{8})\]\s*\Z", re.MULTILINE)
 
 
@@ -252,3 +262,221 @@ def test_should_refuse_a_malformed_notice(payload):
 @pytest.mark.spec("docs/service.md")
 def test_should_drop_a_notice_when_telegram_is_off():
     DisabledNotifier().claude_notice(parse_notice(notice(), "laptop"))
+
+
+def answer(**over: object) -> dict[str, object]:
+    return notice(kind="answer", **over)
+
+
+def messages_of(payload: dict[str, object], origin: str = ORIGIN) -> list[str]:
+    return notice_messages(parse_notice(payload, origin))
+
+
+def shown_units(message: str) -> int:
+    return utf16_length(as_telegram_shows(message))
+
+
+def paragraphs(count: int, length: int = 1480) -> str:
+    return "\n\n".join(f"{number:04d} " + "w" * (length - 5) for number in range(count))
+
+
+def three_parts() -> str:
+    """Paragraphs whose blank lines fall in the last quarter of a part, so each cut loses the most room."""
+    return "\n\n".join(letter * size for letter, size in (("q", 2990), ("z", 2990), ("j", 1400)))
+
+
+def counters(messages: list[str]) -> list[str]:
+    return [text_line(message).split(" ")[1] for message in messages]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_parse_an_answer_with_the_text_of_the_whole_reply():
+    parsed = parse_notice(answer(text="x" * ANSWER_TEXT_LIMIT), ORIGIN)
+
+    assert (parsed.kind, len(parsed.text)) == (NoticeKind.ANSWER, ANSWER_TEXT_LIMIT)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_old_limit_for_the_other_kinds():
+    for kind in ("finished", "prompt"):
+        with pytest.raises(ValueError):
+            parse_notice(notice(kind=kind, text="x" * (NOTICE_INPUT_LIMIT + 1)), ORIGIN)
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("text", [
+    "x" * (ANSWER_TEXT_LIMIT + 1),
+    PARTY * (ANSWER_TEXT_LIMIT // 2 + 1),
+    "bot1:a " * 1000,
+    "",
+    " \n\t" + chr(0x200B) + "\n",
+    7,
+    None,
+])
+def test_should_refuse_an_answer_that_is_blank_or_over_the_limit(text):
+    with pytest.raises(ValueError):
+        parse_notice(answer(text=text), ORIGIN)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_line_breaks_of_an_answer_and_escape_them_for_telegram():
+    message, = messages_of(answer(text="First <line> & more\n\n\n\n- item one\n- item two\r\nlast"))
+
+    assert message.splitlines()[:7] == [
+        f"<b>Claude on {ORIGIN}</b>", "", f"{SPEECH_BALLOON} First &lt;line&gt; &amp; more", "",
+        "- item one", "- item two", "last"]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_drop_control_and_format_characters_from_an_answer_but_not_its_line_breaks():
+    message, = messages_of(answer(text="one" + chr(0x202E) + "two\x07\nthree"))
+
+    assert text_line(message) == f"{SPEECH_BALLOON} one two"
+    assert message.splitlines()[3] == "three"
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_send_a_short_answer_as_one_message_that_ends_like_a_ping():
+    message, = messages_of(answer(title="Plan"))
+
+    assert message.splitlines()[-2:] == [
+        f"Plan \u00b7 devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f]"]
+    assert "(1/1)" not in message
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_split_a_long_answer_into_numbered_messages_that_each_end_with_the_marker():
+    messages = messages_of(answer(text=paragraphs(4)))
+
+    assert counters(messages) == ["(1/2)", "(2/2)"]
+    for message in messages:
+        assert message.splitlines()[-1] == "[session 4a015f0f]"
+        assert BOT_MARKER.search(as_telegram_shows(message)) is not None
+        assert shown_units(message) <= MESSAGE_LIMIT
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_split_the_longest_answer_into_three_messages():
+    messages = messages_of(answer(text=three_parts()))
+
+    assert counters(messages) == ["(1/3)", "(2/3)", "(3/3)"]
+    assert [message.count(letter) for message, letter in zip(messages, "qzj")] == [2990, 2990, 1400]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_lose_no_word_of_a_long_answer_when_it_splits():
+    text = paragraphs(4)
+
+    messages = messages_of(answer(text=text))
+
+    shown = "".join(as_telegram_shows(message) for message in messages)
+    assert shown.count("w") == text.count("w")
+    assert [number for number in range(4) if f"{number:04d} " in shown] == [0, 1, 2, 3]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_cut_an_answer_between_paragraphs_when_it_can():
+    first, second = messages_of(answer(text=paragraphs(4, 1300)))
+
+    assert "0002 " in first and "0003 " not in first
+    assert second.splitlines()[2].split(" ", 2)[2].startswith("0003 ")
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("body", [
+    "\n\n".join("p" * 2490 for _ in range(3)),
+    "x" * ANSWER_TEXT_LIMIT,
+    PARTY * (ANSWER_TEXT_LIMIT // 2),
+    "&" * ANSWER_TEXT_LIMIT,
+    "line\n" * 1500,
+    three_parts(),
+    paragraphs(5),
+    paragraphs(3, 2400) + "\n\n" + "y" * 100,
+])
+def test_should_fit_the_longest_answer_in_three_messages_whatever_its_shape(body):
+    worst_case = {"title": "&" * 80, "container": "c" * 63}
+
+    messages = notice_messages(dataclasses_replace(parse_notice(answer(text=body, **worst_case), "&" * 80),
+                                                   link=TERMINAL + "/chat/" + SESSION + "?" + "q" * 80))
+
+    assert 1 <= len(messages) <= 3
+    assert all(shown_units(message) <= MESSAGE_LIMIT for message in messages)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_end_the_third_message_with_an_ellipsis_rather_than_send_a_fourth():
+    huge = ClaudeNotice(UUID(SESSION), None, paragraphs(40, 1500), ORIGIN, NoticeKind.ANSWER)
+
+    messages = notice_messages(huge)
+
+    assert len(messages) == 3
+    assert text_of_last_body(messages[-1]).endswith("\u2026")
+    assert all(shown_units(message) <= MESSAGE_LIMIT for message in messages)
+
+
+def text_of_last_body(message: str) -> str:
+    return message.rsplit("\n\n", 1)[0]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_redact_a_bot_token_in_an_answer_before_it_splits():
+    padding = "w" * 2900
+    messages = messages_of(answer(text=f"{padding} {FAKE_TOKEN} {padding} {FAKE_TOKEN}"))
+
+    shown = "".join(as_telegram_shows(message) for message in messages)
+    assert "AAFakeScrubber" not in shown
+    assert shown.count(REDACTED) == 2
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_link_the_last_message_of_an_answer_to_its_session_in_the_web_terminal():
+    linked = with_session_link(parse_notice(answer(text=paragraphs(4)), ORIGIN), TERMINAL)
+
+    first, last = notice_messages(linked)
+
+    anchor = f'<a href="{TERMINAL}/chat/{SESSION}">Open the session in Safari</a>'
+    assert anchor not in first
+    assert last.splitlines()[-4:-2] == [anchor, ""]
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("kind", "terminal"), [("answer", ""), ("finished", TERMINAL), ("prompt", TERMINAL)])
+def test_should_add_no_link_without_a_web_terminal_address_or_to_another_kind(kind, terminal):
+    parsed = parse_notice(notice(kind=kind), ORIGIN)
+
+    assert with_session_link(parsed, terminal).link is None
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_send_the_parts_of_an_answer_in_order_in_one_background_call():
+    sent: list[urllib.request.Request] = []
+    calls: list[tuple] = []
+
+    def spawn(function, *args):
+        calls.append(args)
+        function(*args)
+
+    TelegramNotifier(TOKEN, CHAT, send=sent.append, spawn=spawn).claude_notice(
+        parse_notice(answer(text=paragraphs(4)), ORIGIN))
+
+    assert len(calls) == 1
+    assert counters([json.loads(request.data)["text"] for request in sent]) == ["(1/2)", "(2/2)"]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_report_a_failed_part_without_its_text_and_send_the_rest():
+    sent: list[str] = []
+
+    def fail_the_second(request: urllib.request.Request) -> None:
+        text = json.loads(request.data)["text"]
+        if "(2/3)" in text:
+            raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", {}, None)
+        sent.append(text)
+    stderr = io.StringIO()
+
+    with redirect_stderr(stderr):
+        notifier(fail_the_second).claude_notice(
+            parse_notice(answer(text=three_parts()), ORIGIN))
+
+    assert counters(sent) == ["(1/3)", "(3/3)"]
+    assert stderr.getvalue() == "telegram: message 2 of 3 not sent (HTTP 429)\n"

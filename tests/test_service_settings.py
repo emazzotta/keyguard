@@ -11,6 +11,7 @@ from keyguard_passkey.service.settings import (
     SettingsError,
     parse_logins,
     parse_requesters,
+    parse_terminal_url,
     settings_from_env,
 )
 
@@ -40,13 +41,15 @@ def test_should_read_every_setting_from_its_variable():
         "KEYGUARD_PASSKEY_TELEGRAM_BOT_TOKEN": "bot",
         "KEYGUARD_PASSKEY_TELEGRAM_CHAT_ID": "42",
         "KEYGUARD_PASSKEY_HEARTBEAT_URL": "https://monitor.example/push",
+        "KEYGUARD_PASSKEY_TERMINAL_URL": "https://terminal.example.ts.net:8443/",
     }
 
     assert settings_from_env(env, STORE) == Settings(
         store=STORE, bind="0.0.0.0", port=9090, identity_header="X-Forwarded-User",
         allowed_logins=frozenset({"me@example.com"}), request_token="token", request_rate_limit=5,
         requesters=(Requester("devbox", "dev box"), Requester("mac", "Mac")), token_label="dev box",
-        identity_label="Mac", telegram_token="bot", telegram_chat="42", heartbeat_url="https://monitor.example/push")
+        identity_label="Mac", telegram_token="bot", telegram_chat="42", heartbeat_url="https://monitor.example/push",
+        terminal_url="https://terminal.example.ts.net:8443")
 
 
 @pytest.mark.spec("docs/service.md")
@@ -75,3 +78,25 @@ def test_should_refuse_a_malformed_requester_list(text):
 def test_should_refuse_a_malformed_setting(name, value):
     with pytest.raises(SettingsError, match=f"KEYGUARD_PASSKEY_{name}"):
         settings_from_env({f"KEYGUARD_PASSKEY_{name}": value}, STORE)
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("text", "origin"), [
+    ("", ""),
+    ("https://terminal.example", "https://terminal.example"),
+    ("https://terminal.example/", "https://terminal.example"),
+    ("https://terminal.example:8443", "https://terminal.example:8443"),
+])
+def test_should_read_the_web_terminal_origin_or_none(text, origin):
+    assert parse_terminal_url(text) == origin
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("text", [
+    "http://terminal.example", "terminal.example", "https://", "https://terminal.example/app",
+    "https://terminal.example?x=1", "https://user@terminal.example", 'https://terminal.example"', "https://a b.example",
+    "https://terminal.example:port", "https://" + "a" * 254,
+])
+def test_should_refuse_a_web_terminal_address_that_is_not_a_bare_https_origin(text):
+    with pytest.raises(SettingsError, match="KEYGUARD_PASSKEY_TERMINAL_URL"):
+        parse_terminal_url(text)

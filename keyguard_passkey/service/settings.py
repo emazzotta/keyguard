@@ -18,6 +18,7 @@ REQUESTER_ID: Final = re.compile(r"[a-z0-9-]{1,32}")
 HEADER_NAME: Final = re.compile(r"[A-Za-z0-9-]{1,64}")
 LIST_SEPARATOR: Final = ","
 PAIR_SEPARATOR: Final = "="
+ORIGIN_SAFE: Final = re.compile(r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?")
 
 
 class SettingsError(ValueError):
@@ -46,6 +47,7 @@ class Settings:
     telegram_token: str = ""
     telegram_chat: str = ""
     heartbeat_url: str = ""
+    terminal_url: str = ""
 
     def public_config(self) -> dict[str, object]:
         return {"requesters": {requester.id: {"label": requester.label} for requester in self.requesters}}
@@ -85,6 +87,14 @@ def parse_requesters(text: str) -> tuple[Requester, ...]:
     return tuple(requesters)
 
 
+def parse_terminal_url(text: str) -> str:
+    """The web terminal's origin, `https://host` with an optional port, or nothing. A path would build a wrong link."""
+    origin = text.rstrip("/")
+    if origin and not ORIGIN_SAFE.fullmatch(origin):
+        raise SettingsError(f"{PREFIX}TERMINAL_URL is not an https origin such as https://terminal.example: {text!r}")
+    return origin
+
+
 def settings_from_env(env: Mapping[str, str], store: Path) -> Settings:
     header = _setting(env, "IDENTITY_HEADER", DEFAULT_IDENTITY_HEADER)
     if not HEADER_NAME.fullmatch(header):
@@ -103,4 +113,5 @@ def settings_from_env(env: Mapping[str, str], store: Path) -> Settings:
         telegram_token=_setting(env, "TELEGRAM_BOT_TOKEN"),
         telegram_chat=_setting(env, "TELEGRAM_CHAT_ID"),
         heartbeat_url=_setting(env, "HEARTBEAT_URL"),
+        terminal_url=parse_terminal_url(_setting(env, "TERMINAL_URL")),
     )

@@ -20,7 +20,7 @@ from typing import ClassVar, Final
 from .. import pages
 from ..store import StaleStore, Store, StoreError
 from .heartbeat import HEALTH_PATH, heartbeat_for
-from .notify import DisabledNotifier, Notifier, parse_notice, telegram_notifier
+from .notify import DisabledNotifier, Notifier, parse_notice, telegram_notifier, with_session_link
 from .requests import (
     RATE_WINDOW_SECONDS,
     AlreadyAnswered,
@@ -255,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
             self.notice_limit.take()
         except RateLimitError as error:
             return self._fail(HTTPStatus.TOO_MANY_REQUESTS, str(error))
-        self.notifier.claude_notice(notice)
+        self.notifier.claude_notice(with_session_link(notice, self.settings.terminal_url))
         return self._send(HTTPStatus.ACCEPTED)
 
     def _send_record(self, record: dict[str, object] | None) -> None:
