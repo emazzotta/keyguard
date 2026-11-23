@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import io
+from contextlib import redirect_stderr
+
 import pytest
 
+from keyguard_passkey.service.hint import NotifyHint
+from keyguard_passkey.service.presence import Presence
 from keyguard_passkey.service.requests import (
     MAX_SEALED_VALUE_CHARS,
     MAX_TITLE_CHARS,
@@ -9,6 +14,7 @@ from keyguard_passkey.service.requests import (
     RateLimitError,
     RequestError,
     RequestQueue,
+    UnlockRequest,
 )
 
 TITLE = "Rechnungstag f\u00fcr den Kunden \u2013 Entwurf"
@@ -282,3 +288,206 @@ def test_should_not_count_a_malformed_request_against_the_rate_limit():
         queue.create({"vars": ["A"]})
 
     assert queue.create(payload())
+
+
+class RecordingEvents:
+    def __init__(self) -> None:
+        self.created_ids: list[str] = []
+        self.expired_ids: list[str] = []
+        self.expired_requests: list[UnlockRequest] = []
+
+    def created(self, request: UnlockRequest) -> None:
+        self.created_ids.append(request.id)
+
+    def expired(self, request: UnlockRequest) -> None:
+        self.expired_ids.append(request.id)
+        self.expired_requests.append(request)
+
+
+TTL = 120
+
+
+def queue_with(events, clock: Clock | None = None) -> tuple[RequestQueue, Clock]:
+    clock = clock or Clock()
+    return RequestQueue(ttl_seconds=TTL, now=clock, events=events), clock
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_report_each_new_request_with_its_hint():
+    events = RecordingEvents()
+    queue, _ = queue_with(events)
+
+    request_id = queue.create(payload(notify={"presence": "away", "container": "box-1"}))
+
+    assert events.created_ids == [request_id]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_read_the_hint_of_a_request_and_default_it_to_unknown():
+    events = RecordingEvents()
+    queue, clock = queue_with(events)
+    queue.create(payload(notify={"presence": "phone", "container": "box-1"}))
+    queue.create(payload())
+    queue.create(payload(notify="away"))
+
+    clock.now += TTL + 1
+    queue.sweep()
+
+    assert [request.hint for request in events.expired_requests] == [
+        NotifyHint(Presence.PHONE, "box-1"), NotifyHint(), NotifyHint()]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_hint_out_of_both_views_of_a_request():
+    queue = RequestQueue()
+    request_id = queue.create(payload(notify={"presence": "away", "container": "box-1"}))
+
+    approver, requester = queue.peek(request_id), queue.get(request_id)
+
+    assert "notify" not in approver and "hint" not in approver
+    assert "notify" not in requester and "hint" not in requester
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_not_report_a_request_that_the_queue_refused():
+    events = RecordingEvents()
+    queue = RequestQueue(rate_limit=1, events=events)
+    queue.create(payload())
+
+    with pytest.raises(RateLimitError):
+        queue.create(payload())
+    with pytest.raises(RequestError):
+        queue.create({"vars": []})
+
+    assert len(events.created_ids) == 1
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_report_an_unanswered_request_once_when_it_expires():
+    events = RecordingEvents()
+    queue, clock = queue_with(events)
+    request_id = queue.create(payload())
+
+    clock.now += TTL + 1
+    queue.sweep()
+    queue.sweep()
+    queue.get(request_id)
+    queue.peek(request_id)
+    queue.respond(request_id, "late")
+
+    assert events.expired_ids == [request_id]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_report_nothing_before_the_time_to_live_has_passed():
+    events = RecordingEvents()
+    queue, clock = queue_with(events)
+    queue.create(payload())
+
+    clock.now += TTL
+    queue.sweep()
+
+    assert events.expired_ids == []
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("read", ["get", "peek", "respond"])
+def test_should_report_an_expiry_that_a_read_finds_before_the_sweeper_does(read):
+    events = RecordingEvents()
+    queue, clock = queue_with(events)
+    request_id = queue.create(payload())
+    clock.now += TTL + 1
+
+    reader = {"get": lambda: queue.get(request_id), "peek": lambda: queue.peek(request_id),
+              "respond": lambda: queue.respond(request_id, "x")}[read]
+    reader()
+    queue.sweep()
+
+    assert events.expired_ids == [request_id]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_report_each_of_several_expired_requests_once():
+    events = RecordingEvents()
+    queue, clock = queue_with(events)
+    first = queue.create(payload())
+    clock.now += 10
+    second = queue.create(payload())
+    clock.now += TTL - 5
+    queue.sweep()
+    clock.now += 10
+    queue.sweep()
+
+    assert events.expired_ids == [first, second]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_not_report_a_request_that_was_answered_even_if_nobody_collected_it():
+    events = RecordingEvents()
+    queue, clock = queue_with(events)
+    queue.respond(queue.create(payload()), "sealed")
+
+    clock.now += TTL + 1
+    queue.sweep()
+
+    assert events.expired_ids == []
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_not_report_a_request_that_the_requester_collected_or_withdrew():
+    events = RecordingEvents()
+    queue, clock = queue_with(events)
+    collected, withdrawn = queue.create(payload()), queue.create(payload())
+    queue.respond(collected, "sealed")
+    queue.get(collected)
+    queue.withdraw(withdrawn)
+
+    clock.now += TTL + 1
+    queue.sweep()
+
+    assert events.expired_ids == []
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_report_outside_the_lock_so_a_listener_may_read_the_queue():
+    seen: list[object] = []
+
+    class Reading(RecordingEvents):
+        def created(self, request: UnlockRequest) -> None:
+            seen.append(queue.peek(request.id))
+
+        def expired(self, request: UnlockRequest) -> None:
+            seen.append(queue.peek(request.id))
+    queue, clock = queue_with(Reading())
+    queue.create(payload())
+    clock.now += TTL + 1
+
+    queue.sweep()
+
+    assert [view is None for view in seen] == [False, True]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_survive_a_listener_that_raises_and_log_no_detail_of_the_request():
+    class Failing(RecordingEvents):
+        def created(self, request: UnlockRequest) -> None:
+            raise RuntimeError(f"secret detail {request.title}")
+
+        def expired(self, request: UnlockRequest) -> None:
+            super().expired(request)
+            raise RuntimeError(f"secret detail {request.title}")
+    events = Failing()
+    queue, clock = queue_with(events)
+    stderr = io.StringIO()
+
+    with redirect_stderr(stderr):
+        first = queue.create(payload(title="private title"))
+        second = queue.create(payload(title="private title"))
+        clock.now += TTL + 1
+        queue.sweep()
+
+    assert queue.peek(first) is None and queue.peek(second) is None
+    assert events.expired_ids == [first, second]
+    assert stderr.getvalue().splitlines() == [
+        "requests: created notice failed (RuntimeError)", "requests: created notice failed (RuntimeError)",
+        "requests: expired notice failed (RuntimeError)", "requests: expired notice failed (RuntimeError)"]

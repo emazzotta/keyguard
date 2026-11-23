@@ -5,14 +5,19 @@ nothing, and a lost request just asks again.
 """
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import re
 import secrets
+import sys
 import threading
 import time
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Protocol
+
+from .hint import HINT_FIELD, NotifyHint, parse_hint
 
 REQUEST_TTL_SECONDS: Final = 300
 REQUEST_ID_BYTES: Final = 16
@@ -74,6 +79,7 @@ class UnlockRequest:
     value: str | None = None
     session: str | None = None
     title: str | None = None
+    hint: NotifyHint = dataclasses.field(default_factory=NotifyHint)
 
     def _signed_view(self) -> dict[str, object]:
         view: dict[str, object] = {field: getattr(self, field) for field in REQUEST_FIELDS}
@@ -128,13 +134,31 @@ def is_display_title(title: str) -> bool:
             and not any(unicodedata.category(char) in HIDDEN_TITLE_CATEGORIES for char in title))
 
 
+class RequestEvents(Protocol):
+    """What the queue reports, outside its lock: a new request, and one that expired with no answer."""
+
+    def created(self, request: UnlockRequest) -> None: ...
+
+    def expired(self, request: UnlockRequest) -> None: ...
+
+
+class NoEvents:
+    def created(self, request: UnlockRequest) -> None:
+        pass
+
+    def expired(self, request: UnlockRequest) -> None:
+        pass
+
+
 class RequestQueue:
     def __init__(self, ttl_seconds: int = REQUEST_TTL_SECONDS, now: Clock = time.time,
-                 rate_limit: int = DEFAULT_RATE_LIMIT, rate_window: float = RATE_WINDOW_SECONDS) -> None:
+                 rate_limit: int = DEFAULT_RATE_LIMIT, rate_window: float = RATE_WINDOW_SECONDS,
+                 events: RequestEvents | None = None) -> None:
         self._requests: dict[str, UnlockRequest] = {}
         self._ttl = ttl_seconds
         self._now = now
         self._creations = SlidingWindowLimit(rate_limit, rate_window, now)
+        self._events: RequestEvents = events or NoEvents()
         self._lock = threading.Lock()
 
     def create(self, payload: object) -> str:
@@ -148,16 +172,17 @@ class RequestQueue:
         with self._lock:
             self._creations.take()
             request_id = secrets.token_urlsafe(REQUEST_ID_BYTES)
-            self._requests[request_id] = UnlockRequest(
+            request = UnlockRequest(
                 id=request_id, vars=payload["vars"], host=payload["host"], eph_pubkey=payload["eph_pubkey"],
                 ts=payload["ts"], sig=payload["sig"], created_at=self._now(), op=op, value=value,
-                session=session, title=title)
+                session=session, title=title, hint=parse_hint(payload.get(HINT_FIELD)))
+            self._requests[request_id] = request
+        self._tell(self._events.created, request)
         return request_id
 
     def get(self, request_id: str) -> dict[str, object] | None:
         """The requester's read: once it carries the answer, the request is gone."""
-        with self._lock:
-            self._purge_expired()
+        with self._exclusive():
             request = self._requests.get(request_id)
             if request is None:
                 return None
@@ -166,14 +191,12 @@ class RequestQueue:
             return request.requester_view()
 
     def peek(self, request_id: str) -> dict[str, object] | None:
-        with self._lock:
-            self._purge_expired()
+        with self._exclusive():
             request = self._requests.get(request_id)
             return None if request is None else request.approver_view()
 
     def respond(self, request_id: str, response: str) -> bool:
-        with self._lock:
-            self._purge_expired()
+        with self._exclusive():
             request = self._requests.get(request_id)
             if request is None:
                 return False
@@ -187,10 +210,32 @@ class RequestQueue:
             return self._requests.pop(request_id, None) is not None
 
     def sweep(self) -> None:
-        with self._lock:
-            self._purge_expired()
+        with self._exclusive():
+            pass
 
-    def _purge_expired(self) -> None:
+    @contextlib.contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Holds the lock after it dropped the expired requests, and reports them once the lock is free."""
+        expired: list[UnlockRequest] = []
+        try:
+            with self._lock:
+                expired = self._purge_expired()
+                yield
+        finally:
+            for request in expired:
+                self._tell(self._events.expired, request)
+
+    def _purge_expired(self) -> list[UnlockRequest]:
+        """Drops every expired request and returns those that nobody answered."""
         cutoff = self._now() - self._ttl
-        for request_id in [rid for rid, request in self._requests.items() if request.created_at < cutoff]:
-            del self._requests[request_id]
+        gone = [request for request in self._requests.values() if request.created_at < cutoff]
+        for request in gone:
+            del self._requests[request.id]
+        return [request for request in gone if request.response is None]
+
+    @staticmethod
+    def _tell(event: Callable[[UnlockRequest], None], request: UnlockRequest) -> None:
+        try:
+            event(request)
+        except Exception as error:  # noqa: BLE001 - a notice must not cost a request or end the sweeper
+            print(f"requests: {event.__name__} notice failed ({type(error).__name__})", file=sys.stderr, flush=True)
