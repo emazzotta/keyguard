@@ -12,6 +12,7 @@ import hashlib
 import json
 import secrets
 import threading
+import time
 from collections.abc import Callable, Iterable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,11 +20,14 @@ from typing import ClassVar, Final
 
 from .. import pages
 from ..store import StaleStore, Store, StoreError
+from .announce import KeyguardAnnouncer
 from .heartbeat import HEALTH_PATH, heartbeat_for
 from .notify import DisabledNotifier, Notifier, parse_notice, telegram_notifier, with_session_link
 from .requests import (
     RATE_WINDOW_SECONDS,
+    REQUEST_TTL_SECONDS,
     AlreadyAnswered,
+    Clock,
     RateLimitError,
     RequestError,
     RequestQueue,
@@ -285,16 +289,25 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json({"ok": True})
 
 
+def request_queue_for(settings: Settings, notifier: Notifier, ttl_seconds: int = REQUEST_TTL_SECONDS,
+                      now: Clock = time.time) -> RequestQueue:
+    """The queue of unlock requests, whose wait and expiry notices go to the notifier."""
+    labels = {requester.id: requester.label for requester in settings.requesters}
+    return RequestQueue(ttl_seconds=ttl_seconds, now=now, rate_limit=settings.request_rate_limit,
+                        events=KeyguardAnnouncer(notifier, labels, settings.public_url))
+
+
 def build_server(settings: Settings, notifier: Notifier | None = None,
                  notice_rate_limit: int = NOTICE_RATE_LIMIT,
                  page_source: pages.PageSource = pages.page,
                  queue: RequestQueue | None = None) -> DrainingServer:
     settings.store.mkdir(parents=True, exist_ok=True)
+    chosen = notifier or telegram_notifier(settings.telegram_token, settings.telegram_chat)
     handler = type("BoundHandler", (Handler,), {
         "settings": settings,
         "store": Store(settings.store),
-        "queue": queue or RequestQueue(rate_limit=settings.request_rate_limit),
-        "notifier": notifier or telegram_notifier(settings.telegram_token, settings.telegram_chat),
+        "queue": queue or request_queue_for(settings, chosen),
+        "notifier": chosen,
         "notice_limit": SlidingWindowLimit(notice_rate_limit, RATE_WINDOW_SECONDS),
         "page_source": staticmethod(page_source),
     })
@@ -318,8 +331,9 @@ def describe(settings: Settings, server: ThreadingHTTPServer) -> str:
 
 
 def serve(settings: Settings) -> None:
-    queue = RequestQueue(rate_limit=settings.request_rate_limit)
-    server = build_server(settings, queue=queue)
+    notifier = telegram_notifier(settings.telegram_token, settings.telegram_chat)
+    queue = request_queue_for(settings, notifier)
+    server = build_server(settings, notifier=notifier, queue=queue)
     print(describe(settings, server), flush=True)
     background = Background()
     background.start(sweep_until_stopped, queue, background.stopped)

@@ -14,7 +14,7 @@ import pytest
 
 from keyguard_passkey.pages import CSS, HTML, JAVASCRIPT, Page
 from keyguard_passkey.service import server as service
-from keyguard_passkey.service.notify import ANSWER_HARD_LIMIT, ANSWER_WINDOW, ClaudeNotice
+from keyguard_passkey.service.notify import ANSWER_HARD_LIMIT, ANSWER_WINDOW, ClaudeNotice, NoticeKind
 from keyguard_passkey.service.settings import DEFAULT_IDENTITY_HEADER, Requester, Settings
 from keyguard_passkey.store import Store
 
@@ -24,6 +24,8 @@ REQUEST_TOKEN = "requester-test-token"
 BEARER = {"Authorization": f"Bearer {REQUEST_TOKEN}"}
 SESSION = "4a015f0f-199b-4270-9c06-fecc5d85b976"
 TERMINAL_URL = "https://terminal.example"
+PUBLIC_URL = "https://unlock.example"
+REQUEST_TTL = 300
 COMMIT_BODY = json.dumps({"files": {"index.age": base64.b64encode(b"x").decode()}}).encode()
 NOTICE = json.dumps({"session": SESSION, "container": "f635a28c3a2e", "text": "Waiting for your OK."}).encode()
 TOKEN_LABEL = "dev box"
@@ -116,8 +118,29 @@ def notified(tmp_path):
     notifier = RecordingNotifier()
     served = Running(tmp_path, notifier=notifier, settings={
         "request_token": REQUEST_TOKEN, "token_label": TOKEN_LABEL, "identity_label": IDENTITY_LABEL,
-        "terminal_url": TERMINAL_URL})
+        "terminal_url": TERMINAL_URL, "public_url": PUBLIC_URL, "requesters": (Requester("devbox", "dev box"),)})
     yield served, notifier
+    served.server.shutdown()
+
+
+class Clock:
+    now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def pass_the_time_to_expiry(self) -> None:
+        self.now += REQUEST_TTL + 1
+
+
+@pytest.fixture
+def timed(tmp_path):
+    """The same service with a clock the test moves, and the queue it sweeps."""
+    notifier, clock = RecordingNotifier(), Clock()
+    settings = {"request_token": REQUEST_TOKEN, "public_url": PUBLIC_URL, "requesters": (Requester("devbox", "dev box"),)}
+    queue = service.request_queue_for(Settings(store=tmp_path, port=0, **settings), notifier, REQUEST_TTL, clock)
+    served = Running(tmp_path, notifier=notifier, queue=queue, settings=settings)
+    yield served, notifier, clock, queue
     served.server.shutdown()
 
 
@@ -528,12 +551,95 @@ def test_should_answer_404_for_a_page_the_source_lacks(running):
 
 
 @pytest.mark.spec("docs/service.md")
-def test_should_send_no_notice_for_a_request_or_its_answer(notified):
+@pytest.mark.parametrize("notify", [{"presence": "away"}, {"presence": "unknown"}, None])
+def test_should_post_a_wait_notice_with_the_approve_link_for_a_request_while_the_owner_is_away(notified, notify):
+    served, notifier = notified
+    extra = {} if notify is None else {"notify": notify}
+
+    request_id = served.create(**extra, session="4a015f0f", title="Plan")
+
+    wait, = notifier.notices
+    assert (wait.kind, wait.session, wait.title, wait.link) == (
+        NoticeKind.KEYGUARD_WAIT, "4a015f0f", "Plan", f"{PUBLIC_URL}/approve?id={request_id}")
+    assert wait.text == "Waiting for your approval: dev box asks to read 2 variables."
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("presence", ["computer", "phone"])
+def test_should_post_no_wait_notice_while_the_owner_is_present(notified, presence):
     served, notifier = notified
 
-    status = served.answer(served.create(), {"response": "sealed"})
+    served.create(notify={"presence": presence})
 
-    assert status == HTTPStatus.OK
+    assert notifier.notices == []
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_hint_off_the_views_of_a_request(notified):
+    served, _ = notified
+    request_id = served.create(notify={"presence": "away", "container": "box-1"})
+
+    approver = json.loads(served.call(f"/r/{request_id}/request", headers=AUTH)[1])
+    requester = json.loads(served.call(f"/r/{request_id}", headers=BEARER)[1])
+
+    assert "notify" not in approver and "notify" not in requester
+    assert "hint" not in approver and "hint" not in requester
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("presence", ["computer", "phone", "away", "unknown"])
+def test_should_post_one_failure_line_when_a_request_expires_whatever_the_presence(timed, presence):
+    served, notifier, clock, queue = timed
+    served.create(notify={"presence": presence, "container": "box-1"}, session="4a015f0f")
+    notifier.notices.clear()
+
+    clock.pass_the_time_to_expiry()
+    queue.sweep()
+    queue.sweep()
+
+    failure, = notifier.notices
+    assert (failure.kind, failure.session, failure.container) == (NoticeKind.KEYGUARD_FAILED, "4a015f0f", "box-1")
+    assert failure.link is None
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_post_the_failure_line_when_a_request_is_read_after_it_expired_instead_of_swept(timed):
+    served, notifier, clock, _ = timed
+    request_id = served.create(notify={"presence": "computer"})
+
+    clock.pass_the_time_to_expiry()
+    status = served.status(f"/r/{request_id}", headers=BEARER)
+
+    assert status == HTTPStatus.NOT_FOUND
+    assert [notice.kind for notice in notifier.notices] == [NoticeKind.KEYGUARD_FAILED]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_post_no_failure_line_for_an_answer_whether_it_approves_or_refuses(timed):
+    served, notifier, clock, queue = timed
+    approved, refused = served.create(), served.create()
+    notifier.notices.clear()
+
+    assert served.answer(approved, {"response": "sealed values"}) == HTTPStatus.OK
+    assert served.answer(refused, {"response": "sealed refusal"}) == HTTPStatus.OK
+    assert served.call(f"/r/{approved}", headers=BEARER)[0] == HTTPStatus.OK
+    clock.pass_the_time_to_expiry()
+    queue.sweep()
+
+    assert notifier.notices == []
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_post_no_failure_line_when_the_requester_cancels(timed):
+    served, notifier, clock, queue = timed
+    request_id = served.create()
+    notifier.notices.clear()
+
+    status = served.status(f"/r/{request_id}", "DELETE", BEARER)
+    clock.pass_the_time_to_expiry()
+    queue.sweep()
+
+    assert status == HTTPStatus.NO_CONTENT
     assert notifier.notices == []
 
 
@@ -609,6 +715,30 @@ def test_should_relay_a_long_answer_cut_instead_of_refusing_it(notified, length,
 
 
 @pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("session", [SESSION, "4a015f0f", None])
+def test_should_relay_a_failure_line_from_outside_without_a_link_or_a_session_when_it_has_none(notified, session):
+    served, notifier = notified
+
+    status = served.status("/notify", "POST", BEARER, notice_body(
+        kind="keyguard_failed", session=session, text="The keyguard has no answer.", link="https://evil.example/x"))
+
+    assert status == HTTPStatus.ACCEPTED
+    failure, = notifier.notices
+    assert (failure.kind, failure.session, failure.origin, failure.link) == (
+        NoticeKind.KEYGUARD_FAILED, session, TOKEN_LABEL, None)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_refuse_the_wait_kind_from_outside_so_that_no_caller_skips_the_presence_check(notified):
+    served, notifier = notified
+
+    status = served.status("/notify", "POST", BEARER, notice_body(kind="keyguard_wait"))
+
+    assert status == HTTPStatus.BAD_REQUEST
+    assert notifier.notices == []
+
+
+@pytest.mark.spec("docs/service.md")
 @pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer wrong"}])
 def test_should_refuse_a_notice_without_token_or_identity(notified, headers):
     served, notifier = notified
@@ -637,7 +767,7 @@ def test_should_limit_notices_apart_from_requests(tmp_path):
         served.server.shutdown()
 
     assert (first, second, request) == (HTTPStatus.ACCEPTED, HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.OK)
-    assert len(notifier.notices) == 1
+    assert [notice.kind for notice in notifier.notices] == [NoticeKind.FINISHED, NoticeKind.KEYGUARD_WAIT]
 
 
 @pytest.mark.spec("docs/service.md")
