@@ -1,5 +1,6 @@
 """Tells the owner's chat about unlock requests: a wait notice while the owner may not see one, and a failure line when
-one expires with no answer.
+one expires with no answer. A request from an old client sends no hint, so it gets no wait notice: the service cannot
+tell whether the owner sits at a screen.
 
 Both go through the notifier of the session pings. The text names the requester by the label in the settings and counts
 the variables without naming them. The link comes from the settings and the request's id, never from the request.
@@ -29,7 +30,7 @@ class KeyguardAnnouncer:
         self._public_url = public_url
 
     def created(self, request: UnlockRequest) -> None:
-        if request.hint.presence in SEEN_PRESENCE:
+        if request.hint is None or request.hint.presence in SEEN_PRESENCE:
             return
         link = f"{self._public_url}{APPROVE_PATH}{request.id}" if self._public_url else None
         self._post(request, NoticeKind.KEYGUARD_WAIT, f"Waiting for your approval: {self._what(request, 'asks')}.", link)
@@ -39,8 +40,9 @@ class KeyguardAnnouncer:
                    f"Request expired with no answer: {self._what(request, 'asked')}.")
 
     def _post(self, request: UnlockRequest, kind: NoticeKind, text: str, link: str | None = None) -> None:
+        container = request.hint.container if request.hint else None
         self._notifier.claude_notice(ClaudeNotice(
-            session=request.session, container=request.hint.container, text=text, origin=KEYGUARD_ORIGIN, kind=kind,
+            session=request.session, container=container, text=text, origin=KEYGUARD_ORIGIN, kind=kind,
             title=request.title, link=link))
 
     def _what(self, request: UnlockRequest, verb: str) -> str:

@@ -556,12 +556,11 @@ def test_should_answer_404_for_a_page_the_source_lacks(running):
 
 
 @pytest.mark.spec("docs/service.md")
-@pytest.mark.parametrize("notify", [{"presence": "away"}, {"presence": "unknown"}, None])
+@pytest.mark.parametrize("notify", [{"presence": "away"}, {"presence": "unknown"}])
 def test_should_post_a_wait_notice_with_the_approve_link_for_a_request_while_the_owner_is_away(notified, notify):
     served, notifier = notified
-    extra = {} if notify is None else {"notify": notify}
 
-    request_id = served.create(**extra, session="4a015f0f", title="Plan")
+    request_id = served.create(notify=notify, session="4a015f0f", title="Plan")
 
     wait, = notifier.notices
     assert (wait.kind, wait.session, wait.title, wait.link) == (
@@ -577,6 +576,28 @@ def test_should_post_no_wait_notice_while_the_owner_is_present(notified, presenc
     served.create(notify={"presence": presence})
 
     assert notifier.notices == []
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_post_no_wait_notice_for_a_request_from_a_client_that_sends_no_hint(notified):
+    served, notifier = notified
+
+    served.create(session="4a015f0f")
+
+    assert notifier.notices == []
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_post_one_failure_line_for_a_request_from_a_client_that_sends_no_hint(timed):
+    served, notifier, clock, queue = timed
+    served.create(session="4a015f0f")
+
+    clock.pass_the_time_to_expiry()
+    queue.sweep()
+    queue.sweep()
+
+    failure, = notifier.notices
+    assert (failure.kind, failure.session, failure.container) == (NoticeKind.KEYGUARD_FAILED, "4a015f0f", None)
 
 
 @pytest.mark.spec("docs/service.md")
@@ -783,7 +804,7 @@ def test_should_limit_notices_apart_from_requests(tmp_path):
     served = Running(tmp_path, notifier=notifier, notice_rate_limit=1, settings={"request_token": REQUEST_TOKEN})
     try:
         first, second = (served.status("/notify", "POST", BEARER, NOTICE) for _ in range(2))
-        request = served.status("/requests", "POST", BEARER, request_body())
+        request = served.status("/requests", "POST", BEARER, request_body(notify={"presence": "away"}))
     finally:
         served.server.shutdown()
 

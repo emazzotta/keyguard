@@ -194,8 +194,9 @@ The service tells the same Telegram chat what became of an unlock request when y
 
 | What happens to a request | The chat gets |
 |---|---|
-| It opens while you are `away` or `unknown` | One wait notice, at once |
-| It opens while you are at a `computer` or on a `phone` | Nothing |
+| It opens with a hint that says `away` or `unknown` | One wait notice, at once |
+| It opens with a hint that says `computer` or `phone` | Nothing |
+| It opens with no hint, from an old client | No wait notice: the service cannot tell where you are, and a notice for each request would be noise |
 | It gets an answer, approved or refused | Nothing: the page seals both, so the service cannot tell them apart |
 | The requester cancels it (`DELETE /r/<id>`) | Nothing |
 | It expires with no answer, whatever the presence | One `❌🔐` line |
@@ -238,7 +239,7 @@ The requester adds an object to the body of `POST /requests`. The signature does
 | `presence` | `computer`, `phone`, `away` or `unknown`. A missing or other value counts as `unknown`, and `unknown` counts as `away` |
 | `container` | Optional: the host label of the requester's container, 1 to 63 letters, digits or hyphens. Anything else is dropped |
 
-A wrong `notify` field never costs the request. An old client sends none, so it gets the wait notice. A requester can claim `computer` to hide the wait notice of its own request, never the line for an expiry. The service learns the Claude session from the signed `session` field (`KEYGUARD_SESSION`, which the devbox wrapper sets). The container label comes from the requester: the client sends `KEYGUARD_CONTAINER`, and a machine that does not set it posts notices with no container.
+A wrong `notify` field never costs the request. A request with no `notify` field, or with one that is not an object, comes from an old client: it gets no wait notice, its failure line has no container, and an older service ignores the field. A hint with a missing or wrong `presence` is not that: it counts as `unknown` and posts the wait notice. A requester can claim `computer` to hide the wait notice of its own request, never the line for an expiry. The service learns the Claude session from the signed `session` field (`KEYGUARD_SESSION`, which the devbox wrapper sets). The container label comes from the requester: the client sends `KEYGUARD_CONTAINER`, and a machine that does not set it posts notices with no container.
 
 ### Where `presence` Comes From
 
@@ -260,17 +261,17 @@ The Mac keyguard server asks for secrets without this service, so it posts its o
 | `text` | 1 to 4000 characters, shown up to 300 |
 | `session` | Optional: 8 letters or digits, or a full UUID. Leave it out, or send `null`, when the requester has no Claude session |
 | `container` | Optional: a host label |
-| `title` | Optional: at most 4000 characters, shown up to 60 |
+| `title` | Optional: at most 4000 characters, shown up to 60. The caller names itself here, for example `Mac keyguard`: the message has no heading and no origin |
 
 ```json
 {"kind": "keyguard_failed", "session": "4a015f0f", "container": "devbox-7f7d78d989-tgd9t",
- "title": "Plan the migration", "text": "Mac keyguard: no answer to a request for 2 variables."}
+ "title": "Mac keyguard", "text": "No answer to a request for 2 variables."}
 ```
 
 ```
-❌🔐 Mac keyguard: no answer to a request for 2 variables.
+❌🔐 No answer to a request for 2 variables.
 
-Plan the migration · devbox-7f7d78d989-tgd9t
+Mac keyguard · devbox-7f7d78d989-tgd9t
 [session 4a015f0f]
 ```
 

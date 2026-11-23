@@ -323,10 +323,11 @@ def test_should_report_each_new_request_with_its_hint():
 
 
 @pytest.mark.spec("docs/service.md")
-def test_should_read_the_hint_of_a_request_and_default_it_to_unknown():
+def test_should_read_the_hint_of_a_request_and_keep_none_for_a_request_without_an_object():
     events = RecordingEvents()
     queue, clock = queue_with(events)
     queue.create(payload(notify={"presence": "phone", "container": "box-1"}))
+    queue.create(payload(notify={}))
     queue.create(payload())
     queue.create(payload(notify="away"))
 
@@ -334,7 +335,7 @@ def test_should_read_the_hint_of_a_request_and_default_it_to_unknown():
     queue.sweep()
 
     assert [request.hint for request in events.expired_requests] == [
-        NotifyHint(Presence.PHONE, "box-1"), NotifyHint(), NotifyHint()]
+        NotifyHint(Presence.PHONE, "box-1"), NotifyHint(), None, None]
 
 
 @pytest.mark.spec("docs/service.md")

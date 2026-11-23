@@ -6,7 +6,6 @@ nothing, and a lost request just asks again.
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import re
 import secrets
 import sys
@@ -79,7 +78,7 @@ class UnlockRequest:
     value: str | None = None
     session: str | None = None
     title: str | None = None
-    hint: NotifyHint = dataclasses.field(default_factory=NotifyHint)
+    hint: NotifyHint | None = None
 
     def _signed_view(self) -> dict[str, object]:
         view: dict[str, object] = {field: getattr(self, field) for field in REQUEST_FIELDS}

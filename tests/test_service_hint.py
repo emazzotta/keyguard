@@ -26,13 +26,15 @@ LABEL = "devbox-7f7d78d989-tgd9t"
     ({"presence": "away", "container": 7}, NotifyHint(Presence.AWAY)),
     ({"presence": "away", "other": "ignored"}, NotifyHint(Presence.AWAY)),
     ({}, NotifyHint()),
-    ([], NotifyHint()),
-    ("away", NotifyHint()),
-    (None, NotifyHint()),
-    (7, NotifyHint()),
 ])
 def test_should_read_what_it_can_from_the_hint_and_never_refuse_it(raw, expected):
     assert parse_hint(raw) == expected
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("raw", [None, [], "away", 7, True])
+def test_should_read_no_hint_at_all_from_a_field_that_is_not_an_object(raw):
+    assert parse_hint(raw) is None
 
 
 @pytest.mark.spec("docs/service.md")

@@ -55,8 +55,8 @@ def expire(queue: RequestQueue, clock: Clock) -> None:
 
 
 @pytest.mark.spec("docs/service.md")
-@pytest.mark.parametrize("notify", [{"presence": "away"}, {"presence": "unknown"}, {}, "away", None])
-def test_should_post_a_wait_notice_at_once_when_the_owner_is_away_or_unknown(queue, notifier, notify):
+@pytest.mark.parametrize("notify", [{"presence": "away"}, {"presence": "unknown"}, {}, {"presence": "present"}])
+def test_should_post_a_wait_notice_at_once_when_the_hint_says_the_owner_is_away_or_unknown(queue, notifier, notify):
     request_id = queue.create(payload(notify=notify))
 
     wait, = notifier.notices
@@ -66,13 +66,18 @@ def test_should_post_a_wait_notice_at_once_when_the_owner_is_away_or_unknown(que
 
 
 @pytest.mark.spec("docs/service.md")
-def test_should_post_a_wait_notice_for_an_old_client_that_sends_no_hint(queue, notifier):
+@pytest.mark.parametrize("notify", [None, "away", ["away"], 7])
+def test_should_post_no_wait_notice_for_an_old_client_that_sends_no_hint_but_still_one_failure_line(
+        queue, notifier, clock, notify):
     body = payload()
     del body["notify"]
+    queue.create(body if notify is None else payload(notify=notify))
 
-    queue.create(body)
+    expire(queue, clock)
+    expire(queue, clock)
 
-    assert [notice.kind for notice in notifier.notices] == [NoticeKind.KEYGUARD_WAIT]
+    failure, = notifier.notices
+    assert (failure.kind, failure.container) == (NoticeKind.KEYGUARD_FAILED, None)
 
 
 @pytest.mark.spec("docs/service.md")
