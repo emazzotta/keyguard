@@ -106,6 +106,8 @@ Released values stay in memory for 10 minutes, so the next command for the same 
 | `KEYGUARD_PASSKEY_HOLD_SECONDS` | Hold time, at most 600; 0 holds nothing | 600 |
 | `KEYGUARD_PASSKEY_STATE_DIR` | Folder for the hold's address file | the config folder |
 | `KEYGUARD_SESSION`, `KEYGUARD_TITLE` | The asking session, shown on the page | none |
+| `KEYGUARD_CONTAINER` | The host label of the asking container, shown in the service's Telegram notices | none |
+| `KEYGUARD_PASSKEY_PRESENCE_DIR` | The folder that shows whether you sit at a screen, which decides whether the service posts a wait notice | `~/.claude/presence` |
 
 The config folder is `%APPDATA%\keyguard-passkey` on Windows and `$XDG_CONFIG_HOME/keyguard-passkey` elsewhere, with `~/.config/keyguard-passkey` as the fallback.
 

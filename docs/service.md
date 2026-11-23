@@ -92,6 +92,7 @@ Another proxy needs the same behaviour, and `KEYGUARD_PASSKEY_IDENTITY_HEADER` s
 | `KEYGUARD_PASSKEY_HEARTBEAT_URL` | A push monitor URL, called each minute while `/healthz` answers | off |
 | `KEYGUARD_PASSKEY_TELEGRAM_BOT_TOKEN`, `KEYGUARD_PASSKEY_TELEGRAM_CHAT_ID` | Relay the notices posted to `/notify` to a Telegram chat | off |
 | `KEYGUARD_PASSKEY_TERMINAL_URL` | The origin of the web terminal, `https://host` with an optional port and no path: an `answer` ping ends with a link to `<origin>/chat/<session>` | off: no link |
+| `KEYGUARD_PASSKEY_PUBLIC_URL` | The origin where your phone reaches the service, `https://host` with an optional port and no path: a wait notice ends with a link to `<origin>/approve?id=<id>` | off: no link |
 | `KEYGUARD_PASSKEY_TOKEN_LABEL`, `KEYGUARD_PASSKEY_IDENTITY_LABEL` | How a notice names a caller with the token or with the header | `token client`, `signed-in device` |
 
 `serve` prints the settings it runs with, without the secrets.
@@ -131,7 +132,7 @@ The asking machine needs `age` and OpenSSL 3 on `PATH`: it signs with OpenSSL an
 | `POST /requests`, `GET /r/<id>`, `DELETE /r/<id>` | The asking machine | request token or identity header |
 | `POST /notify` | Scripts | request token or identity header |
 
-A request expires after 5 minutes. The service keeps open requests in memory only, so a restart drops them, and the asking command reports that the service no longer holds its request.
+A request expires after 5 minutes. The service keeps open requests in memory only, so a restart drops them, and the asking command reports that the service no longer holds its request. `POST /requests` also takes an unsigned `notify` field, which only the notices use ([Keyguard Notices](#keyguard-notices)).
 
 ## Session Pings
 
@@ -139,11 +140,11 @@ A request expires after 5 minutes. The service keeps open requests in memory onl
 
 | Field | Value |
 |---|---|
-| `session` | The session's UUID |
+| `session` | The session's UUID. A `keyguard_failed` notice may also name it by its first 8 characters, or leave the field out |
 | `container` | Optional: the host label of the container that runs the session |
 | `title` | Optional: the session's title, at most 4000 characters |
 | `text` | 1 to 4000 characters, for `answer` 1 to 100000 |
-| `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default), `answer` for the whole text of a reply (see Answers) |
+| `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default), `answer` for the whole text of a reply (see Answers), `keyguard_failed` for a keyguard request that got no answer (see Keyguard Notices) |
 
 The service answers `202` and sends in the background, `400` for any other body, and `429` past 20 pings a minute. It writes the message itself in Telegram HTML and escapes each value, so a caller cannot add a line or a tag:
 
@@ -186,6 +187,96 @@ Open the session in Safari
 Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
 [session 4a015f0f]
 ```
+
+## Keyguard Notices
+
+The service tells the same Telegram chat what became of an unlock request when you may not have seen it. It writes these notices with the marks, the marker and the container label of a ping, but they have no `Claude on ...` heading: the message opens with its mark.
+
+| What happens to a request | The chat gets |
+|---|---|
+| It opens while you are `away` or `unknown` | One wait notice, at once |
+| It opens while you are at a `computer` or on a `phone` | Nothing |
+| It gets an answer, approved or refused | Nothing: the page seals both, so the service cannot tell them apart |
+| The requester cancels it (`DELETE /r/<id>`) | Nothing |
+| It expires with no answer, whatever the presence | One `❌🔐` line |
+| The service restarts while it is open | Nothing: the service keeps requests in memory only |
+
+The service sees an expiry in its sweep, every 15 seconds, or in the next call that purges the queue, so the line comes within about 15 seconds of the 5 minutes. An answered request that nobody collected is not an expiry.
+
+```
+🔐 Waiting for your approval: dev box asks to read 2 variables.
+
+Approve in Safari
+
+Plan the migration · devbox-7f7d78d989-tgd9t
+[session 4a015f0f]
+```
+
+```
+❌🔐 Request expired with no answer: dev box asked to read 2 variables.
+
+Plan the migration · devbox-7f7d78d989-tgd9t
+[session 4a015f0f]
+```
+
+- The text names the requester by its label in `KEYGUARD_PASSKEY_REQUESTERS` (`an unlisted machine` when the id has none), the operation (`read`, `set`, `remove` or `list the variable names`) and the number of variables. It never names a variable.
+- The link `Approve in Safari` goes to `KEYGUARD_PASSKEY_PUBLIC_URL/approve?id=<id>`. Without that setting the notice has no link. The service builds it from the setting and the id, never from the request. Telegram's own browser cannot use a passkey, hence Safari.
+- The line above the marker holds the request's `title` and its container, when it has them. It has no session code: the service knows 8 characters of the session, not the UUID. The marker is the first 8 characters of the request's signed `session` field. A request with no `session` has no marker, and a reply to its notice has no session to continue.
+- These notices do not count against the 20 a minute of `/notify`: the limit on new requests bounds them. A notice that cannot be sent is logged without its text and never fails or delays the request.
+
+### The `notify` Field of a Request
+
+The requester adds an object to the body of `POST /requests`. The signature does not cover it, and neither the page nor the requester sees it again.
+
+```json
+{"vars": ["A"], "host": "devbox", "eph_pubkey": "age1...", "ts": 1, "sig": "...",
+ "notify": {"presence": "away", "container": "devbox-7f7d78d989-tgd9t"}}
+```
+
+| Field | Value |
+|---|---|
+| `presence` | `computer`, `phone`, `away` or `unknown`. A missing or other value counts as `unknown`, and `unknown` counts as `away` |
+| `container` | Optional: the host label of the requester's container, 1 to 63 letters, digits or hyphens. Anything else is dropped |
+
+A wrong `notify` field never costs the request. An old client sends none, so it gets the wait notice. A requester can claim `computer` to hide the wait notice of its own request, never the line for an expiry. The service learns the Claude session from the signed `session` field (`KEYGUARD_SESSION`, which the devbox wrapper sets). The container label comes from the requester: the client sends `KEYGUARD_CONTAINER`, and a machine that does not set it posts notices with no container.
+
+### Where `presence` Comes From
+
+The client reads `~/.claude/presence/` when it asks, or the folder in `KEYGUARD_PASSKEY_PRESENCE_DIR`. The web terminal writes it.
+
+- The folder holds one file per web-terminal instance. The writer builds `.<instance>.tmp` and renames it over `<instance>`, so the reader skips every file whose name starts with a dot.
+- A line is `<epoch-seconds> <kind>`, with kind `computer` or `phone`. It is fresh while `now - epoch < 120`; a line dated in the future is fresh. A line that does not parse is ignored.
+- Several files merge. Equal lines may repeat. A file that vanishes between the listing and the read has no lines and is no error. A failed write leaves the last good file, whose lines age out by the 120 seconds.
+- The result is `computer` when any fresh line says `computer`, else `phone` when any says `phone`, else `away` (the folder is readable and holds no fresh line), else `unknown` (the folder is missing or unreadable).
+- The same rules live in the dotfiles, as `classify(lines, now)` in `bin/presence.py`. Change them in both.
+
+### Posting a Failure Line from Outside
+
+The Mac keyguard server asks for secrets without this service, so it posts its own failure line with `POST /notify`, with the same proof as any ping: `kind` `keyguard_failed`.
+
+| Field | Value |
+|---|---|
+| `kind` | `keyguard_failed` |
+| `text` | 1 to 4000 characters, shown up to 300 |
+| `session` | Optional: 8 letters or digits, or a full UUID. Leave it out, or send `null`, when the requester has no Claude session |
+| `container` | Optional: a host label |
+| `title` | Optional: at most 4000 characters, shown up to 60 |
+
+```json
+{"kind": "keyguard_failed", "session": "4a015f0f", "container": "devbox-7f7d78d989-tgd9t",
+ "title": "Plan the migration", "text": "Mac keyguard: no answer to a request for 2 variables."}
+```
+
+```
+❌🔐 Mac keyguard: no answer to a request for 2 variables.
+
+Plan the migration · devbox-7f7d78d989-tgd9t
+[session 4a015f0f]
+```
+
+- The answers are `202`, `400` and `429` of a ping, and the 20 a minute are shared with the pings.
+- The message has no heading and opens with `❌🔐`. The code of the session appears only for a full UUID, and the marker only when the body names a session. A body with no session, title and container is the text alone.
+- The service refuses `keyguard_wait` with `400`: only the service posts it, because it decides from the presence. Post a failure line only for a request that this service does not hold, or the chat gets two.
 
 ## Limits
 
