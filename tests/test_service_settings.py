@@ -10,8 +10,8 @@ from keyguard_passkey.service.settings import (
     Settings,
     SettingsError,
     parse_logins,
+    parse_origin,
     parse_requesters,
-    parse_terminal_url,
     settings_from_env,
 )
 
@@ -42,6 +42,7 @@ def test_should_read_every_setting_from_its_variable():
         "KEYGUARD_PASSKEY_TELEGRAM_CHAT_ID": "42",
         "KEYGUARD_PASSKEY_HEARTBEAT_URL": "https://monitor.example/push",
         "KEYGUARD_PASSKEY_TERMINAL_URL": "https://terminal.example.ts.net:8443/",
+        "KEYGUARD_PASSKEY_PUBLIC_URL": "https://unlock.example.ts.net/",
     }
 
     assert settings_from_env(env, STORE) == Settings(
@@ -49,7 +50,7 @@ def test_should_read_every_setting_from_its_variable():
         allowed_logins=frozenset({"me@example.com"}), request_token="token", request_rate_limit=5,
         requesters=(Requester("devbox", "dev box"), Requester("mac", "Mac")), token_label="dev box",
         identity_label="Mac", telegram_token="bot", telegram_chat="42", heartbeat_url="https://monitor.example/push",
-        terminal_url="https://terminal.example.ts.net:8443")
+        terminal_url="https://terminal.example.ts.net:8443", public_url="https://unlock.example.ts.net")
 
 
 @pytest.mark.spec("docs/service.md")
@@ -87,8 +88,8 @@ def test_should_refuse_a_malformed_setting(name, value):
     ("https://terminal.example/", "https://terminal.example"),
     ("https://terminal.example:8443", "https://terminal.example:8443"),
 ])
-def test_should_read_the_web_terminal_origin_or_none(text, origin):
-    assert parse_terminal_url(text) == origin
+def test_should_read_an_origin_or_none(text, origin):
+    assert parse_origin(text, "TERMINAL_URL") == origin
 
 
 @pytest.mark.spec("docs/service.md")
@@ -97,6 +98,13 @@ def test_should_read_the_web_terminal_origin_or_none(text, origin):
     "https://terminal.example?x=1", "https://user@terminal.example", 'https://terminal.example"', "https://a b.example",
     "https://terminal.example:port", "https://" + "a" * 254,
 ])
-def test_should_refuse_a_web_terminal_address_that_is_not_a_bare_https_origin(text):
+def test_should_refuse_an_address_that_is_not_a_bare_https_origin(text):
     with pytest.raises(SettingsError, match="KEYGUARD_PASSKEY_TERMINAL_URL"):
-        parse_terminal_url(text)
+        parse_origin(text, "TERMINAL_URL")
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("name", ["TERMINAL_URL", "PUBLIC_URL"])
+def test_should_refuse_a_malformed_origin_setting_by_its_name(name):
+    with pytest.raises(SettingsError, match=f"KEYGUARD_PASSKEY_{name}"):
+        settings_from_env({f"KEYGUARD_PASSKEY_{name}": "http://insecure.example"}, STORE)
