@@ -308,7 +308,7 @@ sequenceDiagram
 
 | Field | Value |
 |---|---|
-| `text` | The message: 1 to 1000 characters. Line breaks are allowed; other control characters, format, private-use and surrogate characters, line and paragraph separators, and every default-ignorable code point (which draws as nothing, such as a variation selector) are not |
+| `text` | The message: 1 to 1000 characters. Line breaks are allowed; other control characters, format, private-use and surrogate characters, line and paragraph separators, every default-ignorable code point (which draws as nothing, such as a variation selector), and every blank but the plain space (U+0020), such as a no-break space or the braille blank, are not |
 | `target` | The full conversation id of the session it is for: a Claude Code UUID, an opencode `ses_` id or `agy_` and an agy UUID |
 | `target_box` | That session's box as the web terminal names it: 1 to 63 letters, digits or hyphens |
 | `target_title` | Optional: its title, under the rules of `title` |
@@ -317,7 +317,7 @@ The service answers `400` to any other shape, a `value` included. The page refus
 
 ### The Page
 
-- It shows `Sign a message as you`, the asking machine and session as for any request, the whole text with its line breaks, and `To <target_title> (<first 8 characters of target>) on <target_box>`.
+- It shows `Sign a message as you`, the asking machine and session as for any request, the whole text with its line breaks, and `To <target_title> (<short id>) on <target_box>`: the first 8 characters of a Claude Code or agy UUID, the last 8 of an opencode id.
 - Approve unlocks the store with the passkey and decrypts `KEYGUARD_OWNER_SIGNING_KEY`, an Ed25519 private key in PKCS #8 PEM. The page builds the payload, signs it and answers the token, sealed to the request's one-time key. The answer holds nothing else, and one approval signs one payload.
 - A store without the key gets the answer `absent` with `KEYGUARD_OWNER_SIGNING_KEY`, and the client exits 4, as `get` does for a missing name.
 

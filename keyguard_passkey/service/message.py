@@ -15,6 +15,9 @@ TOKEN: Final = re.compile(r"([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+")
 TOKEN_VERSION: Final = 1
 MAX_MESSAGE_CHARS: Final = 1000
 LINE_BREAK: Final = "\n"
+SPACE: Final = " "
+SPACE_CATEGORY: Final = "Zs"
+BRAILLE_BLANK: Final = "\u2800"
 HIDDEN_MESSAGE_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
 DEFAULT_IGNORABLE: Final = (
     (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
@@ -31,8 +34,9 @@ OWNER_KEY_REFUSED: Final = f"{OWNER_KEY_NAME} is never released, written or remo
 
 def is_hidden(char: str) -> bool:
     point = ord(char)
-    return (unicodedata.category(char) in HIDDEN_MESSAGE_CATEGORIES
-            or any(first <= point <= last for first, last in DEFAULT_IGNORABLE))
+    category = unicodedata.category(char)
+    return (category in HIDDEN_MESSAGE_CATEGORIES or (category == SPACE_CATEGORY and char != SPACE)
+            or char == BRAILLE_BLANK or any(first <= point <= last for first, last in DEFAULT_IGNORABLE))
 
 
 def is_message_text(text: object) -> bool:
