@@ -72,6 +72,18 @@ export const pastePinForm = (transport) => {
     if (next) $('back').href = next
   }
 
+  const keylessAsker = () => {
+    const host = transport.askingHost()
+    return host && !transport.pinned(host) ? host : null
+  }
+
+  const pinnedText = (chosen, unpinned, keyless) => {
+    const names = chosen.map(({ id }) => transport.label(id)).join(', ')
+    const left = unpinned ? ` ${counted(unpinned, 'line')} not pinned, as marked.` : ''
+    const waits = keyless ? ` The request waits for a key for the ${transport.label(keyless)}.` : ''
+    return `Pinned ${counted(chosen.length, 'key')}: ${names}.${left}${waits}`
+  }
+
   $('pins').addEventListener('input', () => {
     replacing.clear()
     showPasted()
@@ -96,12 +108,11 @@ export const pastePinForm = (transport) => {
       } catch {
         return setStatus(STORAGE_BLOCKED, 'err')
       }
-      if (next && unpinned === 0) return location.replace(next)
+      const keyless = next ? keylessAsker() : null
+      if (next && unpinned === 0 && !keyless) return location.replace(next)
       replacing.clear()
       showPasted()
-      const names = chosen.map(({ id }) => transport.label(id)).join(', ')
-      const left = unpinned ? ` ${counted(unpinned, 'line')} not pinned, as marked.` : ''
-      setStatus(`Pinned ${counted(chosen.length, 'key')}: ${names}.${left}`, 'ok')
+      setStatus(pinnedText(chosen, unpinned, keyless), 'ok')
       showBack(next)
     },
   }

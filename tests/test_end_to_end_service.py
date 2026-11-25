@@ -514,13 +514,17 @@ def test_should_return_to_the_waiting_request_once_the_pasted_keys_are_pinned(ma
     assert asking.finish() == (0, "")
 
 
-def test_should_stay_with_the_result_and_a_link_back_when_a_pasted_line_stays_unpinned(machines):
+@pytest.mark.parametrize(("pasted", "states", "left"), [
+    (f"{REQUESTER} c2hvcnQ=\nmac {{mac}}", ["bad-key", "pinned"], " 1 line not pinned, as marked."),
+    ("mac {mac}", ["pinned"], ""),
+], ids=["its line flagged", "its line missing"])
+def test_should_stay_with_the_result_and_a_link_back_while_the_asking_machine_has_no_key(machines, pasted, states, left):
     machines.holding_pins({})
     mac_key = random_key()
     asking = Asking(machines.service, "set", "SECOND", stdin="two")
     machines.page.goto(asking.link)
     machines.page.select_option("#requester", "*")
-    machines.page.fill("#pins", f"{REQUESTER} c2hvcnQ=\nmac {mac_key}")
+    machines.page.fill("#pins", pasted.format(mac=mac_key))
 
     machines.page.click("#pin")
     machines.page.wait_for_selector("#status.ok")
@@ -531,7 +535,23 @@ def test_should_stay_with_the_result_and_a_link_back_when_a_pasted_line_stays_un
     machines.page.click("#approve", timeout=PAGE_TIMEOUT_MS)
 
     assert (shown, machines.pins()["mac"], asking.finish()) == (
-        (["bad-key", "pinned"], "Pinned 1 key: Mac. 1 line not pinned, as marked."), mac_key, (0, ""))
+        (states, f"Pinned 1 key: Mac.{left} The request waits for a key for the dev box."), mac_key, (0, ""))
+
+
+def test_should_stay_with_the_result_and_a_link_back_when_a_pasted_line_stays_unpinned(machines):
+    machines.holding_pins({})
+    asking = Asking(machines.service, "set", "THIRD", stdin="three")
+    machines.page.goto(asking.link)
+    machines.page.select_option("#requester", "*")
+    machines.page.fill("#pins", f"{REQUESTER} {machines.service.public_key}\nnobody {random_key()}")
+
+    machines.page.click("#pin")
+    machines.page.wait_for_selector("#status.ok")
+    shown = (machines.page.eval_on_selector_all("#pin-rows li", ROW_STATES), machines.page.inner_text("#status"))
+    machines.page.click("#back")
+    machines.page.click("#approve", timeout=PAGE_TIMEOUT_MS)
+
+    assert (shown, asking.finish()) == ((["pinned", "unknown"], "Pinned 1 key: dev box. 1 line not pinned, as marked."), (0, ""))
 
 
 @pytest.mark.parametrize("width", LAYOUT_WIDTHS_PX)

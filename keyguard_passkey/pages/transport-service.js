@@ -59,6 +59,7 @@ export const serviceTransport = (params, now = () => Date.now() / 1000) => {
   const requestPath = (suffix) => `/r/${encodeURIComponent(requestId)}/${suffix}`
   let requesters = {}
   let current = null
+  let askingHost = null
   const label = (host) => requesters[host]?.label ?? host
   const pinLink = (host) => `?${new URLSearchParams(requestId ? { id: requestId, pin: host } : { pin: host })}`
   const over = (text, extra = {}) => ({ kind: 'over', text, ...extra })
@@ -72,7 +73,10 @@ export const serviceTransport = (params, now = () => Date.now() / 1000) => {
     if (record.answered) return over('This request is already answered. Nothing is left to approve here.', { tone: 'ok' })
     const verdict = await core.checkSignature(record, requesters, readPin)
     if (verdict === 'unknown-host') return over(`No key can be pinned for the host "${record.host}". Not approving.`)
-    if (verdict === 'unpinned') return setup(record.host)
+    if (verdict === 'unpinned') {
+      askingHost = record.host
+      return setup(record.host)
+    }
     const pinning = { pinLink: pinLink(record.host) }
     if (verdict === 'forged') {
       return over(`Signature check failed: not signed by the key pinned for the ${label(record.host)}. Not approving.`, pinning)
@@ -100,6 +104,7 @@ export const serviceTransport = (params, now = () => Date.now() / 1000) => {
       if (!response.ok) return over(`Request not found (${response.status}). It may have expired.`)
       return review(await response.json())
     },
+    askingHost: () => askingHost,
     pinned: (host) => readPin(core.pinKey(host)),
     pin: (host, key) => {
       localStorage.setItem(core.pinKey(host), key)
