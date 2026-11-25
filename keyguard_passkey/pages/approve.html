@@ -11,6 +11,8 @@
 <link rel="modulepreload" href="./page.js">
 <link rel="modulepreload" href="./unlock-core.js">
 <link rel="modulepreload" href="./owner-message.js">
+<link rel="modulepreload" href="./pin-paste.js">
+<link rel="modulepreload" href="./pin-paste-form.js">
 <link rel="modulepreload" href="./typage.js">
 </head>
 <body>
@@ -28,6 +30,10 @@
     </div>
     <label for="pubkey" id="pubkey-label">Signing key (base64)</label>
     <input id="pubkey" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="44-character base64 key">
+    <label for="pins" id="pins-label" hidden>Signing keys, one line a machine: its id, a space and its key</label>
+    <textarea id="pins" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
+              placeholder="devbox &lt;base64 key&gt;" hidden></textarea>
+    <ul id="pin-rows" class="pin-rows" hidden></ul>
     <button type="submit" id="pin" class="primary">Pin this key</button>
     <div class="note">
       <p>Derive it from the machine's Ed25519 signing key:</p>

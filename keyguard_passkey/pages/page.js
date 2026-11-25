@@ -18,6 +18,8 @@ export const describe = (error) => `${error?.name ?? 'Error'}: ${error?.message 
 
 export const capitalized = (text) => text.charAt(0).toUpperCase() + text.slice(1)
 
+export const STORAGE_BLOCKED = 'This browser blocks storage, so no key can be pinned.'
+
 export const setStatus = (text, kind = '') => {
   $('status').textContent = text
   $('status').className = kind

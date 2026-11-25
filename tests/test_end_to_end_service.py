@@ -87,6 +87,17 @@ TARGET = "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57"
 SIGN_ARGS = ("sign", "--target", TARGET, "--box", "macbook", "--title", "Mazzotta-bot")
 OWNER_MESSAGE = "yes, push personal-infra 06be524c\nthen close the session"
 TOKEN_LIFETIME_SECONDS = 600
+OTHER_MACHINES = (Requester("mac", "Mac"), Requester("ai-navigator", "AI Navigator"))
+MACHINE_IDS = (REQUESTER, *(machine.id for machine in OTHER_MACHINES))
+ALL_MACHINES_LINK = "/approve?pin=*"
+READ_PINS = "(ids) => Object.fromEntries(ids.map((id) => [id, localStorage.getItem(`keyguard.${id}_pubkey`)]))"
+WRITE_PINS = """(pins) => {
+  for (const [id, key] of Object.entries(pins)) {
+    if (key === null) localStorage.removeItem(`keyguard.${id}_pubkey`)
+    else localStorage.setItem(`keyguard.${id}_pubkey`, key)
+  }
+}"""
+ROW_STATES = "(rows) => rows.map((row) => row.dataset.state)"
 
 pytestmark = pytest.mark.spec("docs/service.md")
 
@@ -160,9 +171,9 @@ def requester_keys(folder: Path) -> tuple[Path, str, Path]:
 
 
 @contextmanager
-def served(store: Path) -> Iterator[str]:
+def served(store: Path, requesters: tuple[Requester, ...] = (Requester(REQUESTER, "dev box"),)) -> Iterator[str]:
     server = build_server(Settings(store=store, bind="127.0.0.1", port=0, request_token=REQUEST_TOKEN,
-                                   requesters=(Requester(REQUESTER, "dev box"),)))
+                                   requesters=requesters))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield f"http://localhost:{server.server_address[1]}"
@@ -403,6 +414,115 @@ def test_should_create_a_store_in_an_empty_folder(page, tmp_path):
         read = approved(page, Asking(service, "get", "FIRST"))
 
     assert (written, read) == (0, (0, "FIRST=one\n"))
+
+
+def random_key() -> str:
+    return base64.b64encode(os.urandom(RAW_KEY_BYTES)).decode()
+
+
+@dataclass(frozen=True)
+class Machines:
+    """A service with three requesters, approved from a window whose authenticator holds this store's passkey only."""
+    service: Service
+    page: sync_api.Page
+
+    def holding_pins(self, pins: dict[str, str]) -> None:
+        self.page.goto(f"{self.service.base}{ALL_MACHINES_LINK}")
+        self.page.evaluate(WRITE_PINS, {**dict.fromkeys(MACHINE_IDS), **pins})
+
+    def pins(self) -> dict[str, str | None]:
+        return self.page.evaluate(READ_PINS, list(MACHINE_IDS))
+
+    def paste(self, *lines: str) -> None:
+        self.page.goto(f"{self.service.base}{ALL_MACHINES_LINK}")
+        self.page.fill("#pins", "\n".join(lines))
+
+
+@pytest.fixture(scope="module")
+def machines(browser, tmp_path_factory) -> Iterator[Machines]:
+    folder = tmp_path_factory.mktemp("machines")
+    signing_key, public_key, token_file = requester_keys(folder)
+    with separate_window(browser, LOGIN) as window, \
+            served(folder / "store", (Requester(REQUESTER, "dev box"), *OTHER_MACHINES)) as base:
+        mint(window.page, base)
+        service = Service(base, folder, signing_key, public_key, token_file, window.page.inner_text("#pubkey").strip())
+        yield Machines(service, window.page)
+
+
+def test_should_pin_every_pasted_key_with_one_tap(machines):
+    keys = {machine_id: random_key() for machine_id in MACHINE_IDS}
+    machines.holding_pins({})
+    machines.paste(*(f"{machine_id} {key}" for machine_id, key in keys.items()))
+
+    machines.page.click("#pin")
+    machines.page.wait_for_selector("#status.ok")
+
+    assert machines.pins() == keys
+
+
+def test_should_keep_a_differing_pinned_key_until_its_line_is_ticked_to_replace_it(machines):
+    old, new, other = random_key(), random_key(), random_key()
+    machines.holding_pins({"mac": old})
+    machines.paste(f"mac {new}", f"ai-navigator {other}")
+
+    machines.page.click("#pin")
+    machines.page.wait_for_selector('#pin-rows li[data-id="ai-navigator"][data-state="pinned"]')
+    kept = machines.pins()["mac"]
+    machines.page.check('#pin-rows li[data-id="mac"] input[type="checkbox"]')
+    machines.page.click("#pin")
+    machines.page.wait_for_selector('#pin-rows li[data-id="mac"][data-state="pinned"]')
+
+    assert (kept, machines.pins()["mac"], machines.pins()["ai-navigator"]) == (old, new, other)
+
+
+@pytest.mark.parametrize("opened", ["link", "machine list"])
+def test_should_open_the_paste_box_empty_while_keys_are_pinned(machines, opened):
+    machines.holding_pins({machine_id: random_key() for machine_id in MACHINE_IDS})
+    if opened == "machine list":
+        machines.page.goto(f"{machines.service.base}/approve?pin=mac")
+        machines.page.select_option("#requester", "*")
+    else:
+        machines.page.goto(f"{machines.service.base}{ALL_MACHINES_LINK}")
+
+    machines.page.wait_for_selector("#pins", state="visible")
+
+    shown = (machines.page.inner_text("#title"), machines.page.input_value("#pins"), machines.page.is_visible("#pubkey"))
+    assert shown == ("Pin signing keys", "", False)
+
+
+def test_should_flag_the_lines_it_cannot_pin_and_pin_none_of_them(machines):
+    machines.holding_pins({})
+
+    machines.paste(f"nobody {random_key()}", "mac c2hvcnQ=", REQUESTER, f"ai-navigator {random_key()}",
+                   f"ai-navigator {random_key()}")
+
+    flagged = machines.page.eval_on_selector_all("#pin-rows li", ROW_STATES)
+    assert (flagged, machines.page.is_disabled("#pin"), machines.pins()) == (
+        ["unknown", "bad-key", "unreadable", "twice", "twice"], True, dict.fromkeys(MACHINE_IDS))
+
+
+def test_should_return_to_the_waiting_request_once_the_pasted_keys_are_pinned(machines):
+    machines.holding_pins({})
+    asking = Asking(machines.service, "set", "FIRST", stdin="one")
+    machines.page.goto(asking.link)
+    machines.page.select_option("#requester", "*")
+    machines.page.fill("#pins", f"{REQUESTER} {machines.service.public_key}\nmac {random_key()}")
+
+    machines.page.click("#pin")
+    machines.page.click("#approve", timeout=PAGE_TIMEOUT_MS)
+
+    assert asking.finish() == (0, "")
+
+
+@pytest.mark.parametrize("width", LAYOUT_WIDTHS_PX)
+def test_should_fit_the_pasted_keys_into_the_window(machines, width):
+    machines.holding_pins({"mac": random_key()})
+    machines.paste(f"mac {random_key()}", f"{REQUESTER} {random_key()}",
+                   f"a-machine-nobody-has-ever-named {random_key()}", "a-line-that-is-no-pin")
+
+    problems = layout_problems(machines.page, width)
+
+    assert problems == []
 
 
 @pytest.mark.parametrize("width", LAYOUT_WIDTHS_PX)

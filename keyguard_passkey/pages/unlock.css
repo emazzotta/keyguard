@@ -214,7 +214,7 @@ button { color: inherit; font: inherit; }
 
 .row { display: contents; }
 
-input, select {
+input, select, textarea {
   width: 100%;
   min-height: 50px;
   padding: 12px 14px;
@@ -226,7 +226,9 @@ input, select {
   caret-color: var(--leaf);
 }
 
-input::placeholder { color: var(--faint); }
+input::placeholder, textarea::placeholder { color: var(--faint); }
+
+textarea { resize: vertical; font: 16px/1.5 var(--font-mono); }
 
 select {
   appearance: none;
@@ -251,7 +253,7 @@ select {
   accent-color: var(--leaf);
 }
 
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--leaf);
   background-color: var(--surface);
@@ -259,6 +261,22 @@ input:focus, select:focus {
 }
 
 .form .primary { margin-top: 16px; }
+
+.pin-rows { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+
+.pin-rows li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--sunken);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.pin-rows li.flagged { background: var(--rust-soft); color: var(--rust); }
+
+.pin-rows p { margin: 0; }
 
 .note {
   margin-top: 8px;
@@ -335,7 +353,7 @@ pre {
   .primary { transition: transform 140ms var(--ease-out), filter 180ms ease, opacity 180ms ease; }
   .primary:enabled:active { transform: scale(0.98); }
   .quiet { transition: background-color 160ms ease, color 160ms ease; }
-  input, select { transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease; }
+  input, select, textarea { transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease; }
   #status.busy::before { animation: turn 900ms linear infinite; }
   #status.ok::before { animation: confirm 420ms var(--ease-out); }
 }

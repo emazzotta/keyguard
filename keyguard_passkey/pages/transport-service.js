@@ -1,4 +1,5 @@
 import { messageProblem } from './owner-message.js'
+import { ALL_MACHINES } from './pin-paste.js'
 import * as core from './unlock-core.js'
 import { storeClient, textFile } from './store-client.js'
 
@@ -63,7 +64,8 @@ export const serviceTransport = (params, now = () => Date.now() / 1000) => {
   const over = (text, extra = {}) => ({ kind: 'over', text, ...extra })
   const setup = (wanted) => {
     const hosts = Object.keys(requesters)
-    return { kind: 'setup', hosts, host: hosts.includes(wanted) ? wanted : hosts[0] }
+    const offered = hosts.length > 1 ? [...hosts, ALL_MACHINES] : hosts
+    return { kind: 'setup', hosts, host: offered.includes(wanted) ? wanted : hosts[0] }
   }
 
   const review = async (record) => {

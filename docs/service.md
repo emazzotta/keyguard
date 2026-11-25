@@ -116,6 +116,18 @@ Another proxy needs the same behaviour, and `KEYGUARD_PASSKEY_IDENTITY_HEADER` s
    openssl pkey -in sign.key -pubout -outform DER | tail -c 32 | base64
    ```
 
+   With more than one machine, pin them all at once: choose "All machines" in the Machine list, or open `<service>/approve?pin=*`, and paste one line for each machine, its id, a space and its key:
+
+   ```text
+   mac <44-character base64 key>
+   devbox <44-character base64 key>
+   ```
+
+   - The page lists each line with the machine's name and the first and last 8 characters of its key, and one tap pins every line it can.
+   - It pins nothing for a line whose id no machine has, whose key is not 32 bytes in base64, that is not an id and a key, or whose id another line names too.
+   - A machine with another key pinned keeps it until you tick Replace on its line. A line whose key is already pinned changes nothing.
+   - The box starts empty. The page never fills it from the service, the link or the keys it holds: a key that came from the service would let a changed service choose whose requests you approve.
+
 4. **A first secret.** `printf %s "$VALUE" | keyguard-passkey set API_TOKEN` prints a link. Open it on the phone and approve. `keyguard-passkey get API_TOKEN` then reads it back the same way.
 
 Another device approves too once it has its own passkey: open `<service>/enroll` on it and choose "Add this device instead".

@@ -2,8 +2,10 @@ import { addressee, signOwnerMessage } from './owner-message.js'
 import * as core from './unlock-core.js'
 import {
   $, answerAndClose, authenticatorProblem, capitalized, chip, describe, isCancelled, onSubmit,
-  openTransport, passkeyRefused, reportLost, setStatus, withinAuthenticatorTime,
+  openTransport, passkeyRefused, reportLost, setStatus, STORAGE_BLOCKED, withinAuthenticatorTime,
 } from './page.js'
+import { ALL_MACHINES } from './pin-paste.js'
+import { pastePinForm } from './pin-paste-form.js'
 import { retryingStale } from './store-client.js'
 
 const LISTING_SCOPE = 'every secret name'
@@ -46,9 +48,11 @@ const ANSWERED_PANELS = ['review', 'trust', 'editkey']
 const transport = openTransport()
 const { store } = transport
 const lost = reportLost(transport)
+const pastePins = pastePinForm(transport)
 let current = null
 let pendingRecipients = null
 let setupHost = null
+let setupHosts = []
 
 const unlockRemote = async (meta) => {
   const chosen = core.approvalEnrolment(meta, transport.storedEnrolment())
@@ -206,9 +210,17 @@ const showReview = async ({ request, note, status }) => {
 }
 
 const showPinTarget = (host) => {
+  setupHost = host
+  const all = host === ALL_MACHINES
+  $('title').textContent = all ? 'Pin signing keys' : 'Pin a signing key'
+  for (const id of ['pubkey-label', 'pubkey']) $(id).hidden = all
+  for (const id of ['pins-label', 'pins']) $(id).hidden = !all
+  if (all) return pastePins.show(setupHosts)
   const label = transport.label(host)
   const pinned = transport.pinned(host)
-  setupHost = host
+  $('pin-rows').hidden = true
+  $('pin').textContent = 'Pin this key'
+  $('pin').disabled = false
   $('pubkey-label').textContent = `${capitalized(label)} signing key (base64)`
   $('pubkey').value = pinned ?? ''
   setStatus(pinned
@@ -218,9 +230,10 @@ const showPinTarget = (host) => {
 
 const showSetup = ({ hosts, host }) => {
   if (!host) return setStatus('The service names no requesters, so there is no key to pin.', 'err')
-  $('title').textContent = 'Pin a signing key'
   $('lead').textContent = 'Each request is checked against the key pinned here for the machine that sent it.'
-  $('requester').replaceChildren(...hosts.map((id) => new Option(transport.label(id), id, false, id === host)))
+  setupHosts = hosts
+  const all = hosts.length > 1 ? [new Option('All machines', ALL_MACHINES, false, host === ALL_MACHINES)] : []
+  $('requester').replaceChildren(...hosts.map((id) => new Option(transport.label(id), id, false, id === host)), ...all)
   $('requester-row').hidden = hosts.length < 2
   showPinTarget(host)
   $('setup').hidden = false
@@ -256,7 +269,7 @@ $('trust').addEventListener('click', () => {
 
 $('requester').addEventListener('change', () => showPinTarget($('requester').value))
 
-onSubmit('setup', () => {
+const pinOne = () => {
   try {
     core.decodeSigningKey($('pubkey').value)
   } catch (error) {
@@ -266,10 +279,12 @@ onSubmit('setup', () => {
   try {
     next = transport.pin(setupHost, $('pubkey').value.trim())
   } catch {
-    return setStatus('This browser blocks storage, so the key cannot be pinned.', 'err')
+    return setStatus(STORAGE_BLOCKED, 'err')
   }
   if (next) return location.replace(next)
   setStatus(`Pinned. Requests from the ${transport.label(setupHost)} are now checked against this key.`, 'ok')
-})
+}
+
+onSubmit('setup', () => (setupHost === ALL_MACHINES ? pastePins.pin() : pinOne()))
 
 start().catch((error) => setStatus(`Could not load the request: ${describe(error)}`, 'err'))

@@ -25,6 +25,8 @@ ROUTES: Final = {
     "/transport-service.js": ("transport-service.js", JAVASCRIPT),
     "/unlock-core.js": ("unlock-core.js", JAVASCRIPT),
     "/owner-message.js": ("owner-message.js", JAVASCRIPT),
+    "/pin-paste.js": ("pin-paste.js", JAVASCRIPT),
+    "/pin-paste-form.js": ("pin-paste-form.js", JAVASCRIPT),
     "/typage.js": ("typage.js", JAVASCRIPT),
     "/unlock.css": ("unlock.css", CSS),
 }
