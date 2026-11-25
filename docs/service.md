@@ -346,5 +346,5 @@ The service answers `400` to any other shape, a `value` included. The page refus
 
 - The service serves the pages. Whoever can change the service's files or image can change the code that decrypts on your phone. The pinned keys stop a forged request, not a changed page. Run the image of a release tag, and keep the service where only you can change it.
 - A copy of the store folder holds encrypted files only. It opens with the passkey or with the paper passphrase.
-- The pins live in one browser's storage. A new phone, or a cleared browser, pins each machine again.
+- The pins live in one browser's storage. A new phone, or a cleared browser, pins each machine again. On iOS, a Home Screen web app opens a link to another site, such as an approve link, in its own sheet (Safari View Controller), whose storage is not Safari's: pin each machine there too. Its pins stay after the sheet and the app close.
 - A sign request shows the target's title as the requester sent it. The checker binds the conversation id, not the title.
