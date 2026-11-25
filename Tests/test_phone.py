@@ -98,6 +98,44 @@ def test_should_answer_from_the_phone_and_close_the_touch_id_prompt(touch_id, cl
     assert logged(events, "dismissed")
 
 
+def test_should_clear_the_sessions_expired_phone_requests_when_touch_id_approves(touch_id, client, events):
+    touch_id("printf secret")
+
+    result = phone.race(["A"], SESSION, client(f'echo "$@" >> {events}'), timing=FAST)
+
+    assert (result.ok, result.stdout) == (True, "secret")
+    assert logged(events, "pending --clear-expired=48f92bcb")
+    assert events.read_text() == "pending --clear-expired=48f92bcb\n"
+
+
+@pytest.mark.parametrize(("touch_id_ends", "phone_ends", "answered"), [
+    (OWNER_CANCELS, "", False),
+    (WAIT_FOR_SIGNAL, "printf \"export A='1'\\n\"", True),
+], ids=["owner cancels Touch ID", "phone answers"])
+def test_should_leave_the_expired_phone_requests_to_the_client_unless_touch_id_approves(
+        touch_id, client, events, touch_id_ends, phone_ends, answered):
+    touch_id(touch_id_ends)
+
+    result = phone.race(["A"], SESSION, client(f'echo "$@" >> {events}; {phone_ends}'), timing=FAST)
+
+    assert result.ok is answered
+    settled()
+    assert "--clear-expired" not in (events.read_text() if events.exists() else "")
+
+
+def test_should_answer_from_touch_id_alike_when_the_client_is_too_old_to_clear(touch_id, client, events, failures,
+                                                                               reporting):
+    touch_id("printf secret")
+    too_old = client(f'echo "$@" >> {events}; echo "keyguard-passkey: error: unrecognized arguments" >&2; exit 2')
+
+    result = phone.race(["A"], SESSION, too_old, timing=FAST, outside=reporting)
+
+    assert (result.ok, result.stdout) == (True, "secret")
+    assert logged(events, "--clear-expired")
+    settled()
+    assert failures == []
+
+
 def test_should_answer_a_single_key_with_its_bare_value_as_keyguard_does(touch_id, client):
     touch_id(WAIT_FOR_SIGNAL)
 

@@ -4,9 +4,10 @@ Touch ID shows at once. The keyguard-passkey client that `make install` copies a
 behind the store (KEYGUARD_STORE_URL), where the web terminal and the phone can approve the read. It asks
 at once when nobody sits at a web terminal (presence.py reads that once, when the race starts), else only
 once `Timing.delay` passes without an answer. The first answer wins and the other side is stopped;
-the client withdraws its request on SIGTERM. A Touch ID cancel is a no and ends the read, while a
-failing client never ends a prompt someone may still answer. A read that fails with no phone request behind it is
-reported once (failure_report.py).
+the client withdraws its request on SIGTERM. A Touch ID approval for a caller with a session also runs the
+client's `pending --clear-expired`, as an answer on the phone settles that session's expired requests. A Touch ID
+cancel is a no and ends the read, while a failing client never ends a prompt someone may still answer. A read that
+fails with no phone request behind it is reported once (failure_report.py).
 """
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ _SESSION_ENV = "KEYGUARD_SESSION"
 _TITLE_ENV = "KEYGUARD_TITLE"
 _HOLD_ENV = "KEYGUARD_PASSKEY_HOLD_SECONDS"
 _REQUEST_SENT = "Approve on your phone:"
+_CLEAR_EXPIRED_TIMEOUT = 10
 
 
 class Side(Enum):
@@ -78,6 +80,9 @@ class PhoneClient:
     def argv(self, keys: list[str]) -> list[str]:
         return [str(self.client), "--service", self.service, "--requester", PHONE_REQUESTER,
                 "--signing-key", str(self.signing_key), "get", "--format", "shell", "--", *keys]
+
+    def clear_expired_argv(self, session: str) -> list[str]:
+        return [str(self.client), "pending", f"--clear-expired={session}"]
 
 
 def configured(client: Path | None = PHONE_CLIENT, signing_key: Path | None = PHONE_SIGNING_KEY,
@@ -233,6 +238,9 @@ class _Race:
 
     def _on_touch_id(self, result: CliResult) -> CliResult | None:
         if ends_read(result):
+            session = self._caller.session
+            if result.ok and session:
+                threading.Thread(target=_clear_expired, args=(self._client, self._caller, session), daemon=True).start()
             return result
         self._touch_id_failure = result
         if self._phone is None:
@@ -264,6 +272,18 @@ class _Race:
     def _stop_in_background(self, child: _Child) -> None:
         """Answers the caller at once; the client then has its grace to withdraw its request."""
         threading.Thread(target=child.stop, args=(self._timing.stop_grace,), daemon=True).start()
+
+
+def _clear_expired(client: PhoneClient, caller: Caller, session: str) -> None:
+    """Settles the session's expired phone requests as a phone answer would; a client before the flag refuses."""
+    try:
+        ended = subprocess.run(client.clear_expired_argv(session), env=client_env(caller), capture_output=True,
+                               text=True, timeout=_CLEAR_EXPIRED_TIMEOUT, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        _log(f"expired phone requests stay listed: {error}")
+        return
+    if ended.returncode != 0:
+        _log(f"expired phone requests stay listed: {ended.stderr.strip()}")
 
 
 def _log(message: str) -> None:
