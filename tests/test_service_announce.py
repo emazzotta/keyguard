@@ -61,7 +61,7 @@ def test_should_post_a_wait_notice_at_once_when_the_hint_says_the_owner_is_away_
 
     wait, = notifier.notices
     assert wait.kind is NoticeKind.KEYGUARD_WAIT
-    assert wait.text == "Waiting for your approval: dev box asks to read 2 variables."
+    assert wait.text == "Waiting for your approval: dev box asks to read DB_PASSWORD and API_TOKEN."
     assert wait.link == f"{PUBLIC_URL}/approve?id={request_id}"
 
 
@@ -100,7 +100,7 @@ def test_should_post_exactly_one_failure_line_when_a_request_expires_whatever_th
 
     failure, = notifier.notices
     assert failure.kind is NoticeKind.KEYGUARD_FAILED
-    assert failure.text == "Request expired with no answer: dev box asked to read 2 variables."
+    assert failure.text == "Request expired with no answer: dev box asked to read DB_PASSWORD and API_TOKEN."
 
 
 @pytest.mark.spec("docs/service.md")
@@ -128,29 +128,36 @@ def test_should_post_no_failure_line_for_an_answered_request_that_nobody_collect
 
 @pytest.mark.spec("docs/service.md")
 @pytest.mark.parametrize(("over", "action"), [
-    ({"vars": ["A"]}, "read 1 variable"),
-    ({"vars": ["A", "B", "C"]}, "read 3 variables"),
-    ({"vars": ["A"], "op": "set", "value": "c2VhbGVk"}, "set 1 variable"),
-    ({"vars": ["A"], "op": "rm"}, "remove 1 variable"),
+    ({"vars": ["A"]}, "read A"),
+    ({"vars": ["A", "B"]}, "read A and B"),
+    ({"vars": ["A", "B", "C"]}, "read A, B and C"),
+    ({"vars": ["A", "B", "C", "D", "E"]}, "read A, B, C and 2 more"),
+    ({"vars": ["A"], "op": "set", "value": "c2VhbGVk"}, "set A"),
+    ({"vars": ["A"], "op": "rm"}, "remove A"),
+    ({"vars": ["A", "<b>B</b>", "1C", "D" * 65]}, "read A and 3 more"),
+    ({"vars": ["<b>B</b>", "_" + "D" * 64]}, "read 2 variables"),
+    ({"vars": ["A", 7]}, "read A and 1 more"),
+    ({"vars": "A"}, "read 0 variables"),
     ({"vars": [], "op": "list"}, "list the variable names"),
     ({"vars": [], "op": "sign", "text": "yes", "target": "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57", "target_box": "macbook"},
      "sign a message"),
 ])
-def test_should_say_what_a_request_asks_by_its_operation_and_count(queue, notifier, over, action):
+def test_should_say_what_a_request_asks_by_its_operation_and_its_variables(queue, notifier, over, action):
     queue.create(payload(**over))
 
     assert notifier.notices[0].text == f"Waiting for your approval: dev box asks to {action}."
 
 
 @pytest.mark.spec("docs/service.md")
-def test_should_never_name_a_variable_in_a_notice(queue, notifier, clock):
-    queue.create(payload())
+def test_should_name_the_variables_but_never_a_value_in_either_notice(queue, notifier, clock):
+    queue.create(payload(vars=["TELEGRAM_BOT_WEB_TERMINAL_AUTOMATION_TOKEN"], op="set", value="c2VhbGVk"))
     expire(queue, clock)
 
     texts = [message for notice in notifier.notices for message in notice_messages(notice)]
 
     assert len(texts) == 2
-    assert not any("DB_PASSWORD" in text or "API_TOKEN" in text for text in texts)
+    assert all("set TELEGRAM_BOT_WEB_TERMINAL_AUTOMATION_TOKEN." in text for text in texts)
+    assert not any("c2VhbGVk" in text for text in texts)
 
 
 @pytest.mark.spec("docs/service.md")
@@ -159,7 +166,7 @@ def test_should_name_a_requester_by_its_label_and_an_unlisted_one_as_such(queue,
     queue.create(payload(host=["devbox"]))
 
     assert [notice.text for notice in notifier.notices] == [
-        "Waiting for your approval: an unlisted machine asks to read 2 variables."] * 2
+        "Waiting for your approval: an unlisted machine asks to read DB_PASSWORD and API_TOKEN."] * 2
 
 
 @pytest.mark.spec("docs/service.md")
@@ -200,7 +207,7 @@ def test_should_write_the_wait_notice_with_its_mark_first_and_the_approve_link(q
     message, = notice_messages(notifier.notices[0])
 
     assert message.splitlines() == [
-        f"{LOCK_MARK} Waiting for your approval: dev box asks to read 2 variables.", "",
+        f"{LOCK_MARK} Waiting for your approval: dev box asks to read DB_PASSWORD and API_TOKEN.", "",
         f'<a href="{PUBLIC_URL}/approve?id={request_id}">Approve in Safari</a>', "",
         "box-1", "[session 4a015f0f (Plan the migration)]"]
 
@@ -222,7 +229,7 @@ def test_should_write_the_failure_line_with_its_mark_first(queue, notifier, cloc
     message, = notice_messages(notifier.notices[0])
 
     assert message.splitlines() == [
-        f"{FAILED_MARK} Request expired with no answer: dev box asked to read 2 variables.", "",
+        f"{FAILED_MARK} Request expired with no answer: dev box asked to read DB_PASSWORD and API_TOKEN.", "",
         "box-1", "[session 4a015f0f (Plan the migration)]"]
 
 
@@ -235,4 +242,4 @@ def test_should_write_a_notice_of_a_requester_without_a_session_as_one_line(queu
 
     message, = notice_messages(notice)
 
-    assert message == f"{FAILED_MARK} Request expired with no answer: dev box asked to read 2 variables."
+    assert message == f"{FAILED_MARK} Request expired with no answer: dev box asked to read DB_PASSWORD and API_TOKEN."

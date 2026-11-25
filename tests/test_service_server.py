@@ -565,7 +565,7 @@ def test_should_post_a_wait_notice_with_the_approve_link_for_a_request_while_the
     wait, = notifier.notices
     assert (wait.kind, wait.session, wait.title, wait.link) == (
         NoticeKind.KEYGUARD_WAIT, "4a015f0f", "Plan", f"{PUBLIC_URL}/approve?id={request_id}")
-    assert wait.text == "Waiting for your approval: dev box asks to read 2 variables."
+    assert wait.text == "Waiting for your approval: dev box asks to read A and B."
 
 
 @pytest.mark.spec("docs/service.md")

@@ -2,11 +2,12 @@
 one expires with no answer. A request from an old client sends no hint, so it gets no wait notice: the service cannot
 tell whether the owner sits at a screen.
 
-Both go through the notifier of the session pings. The text names the requester by the label in the settings and counts
-the variables without naming them. The link comes from the settings and the request's id, never from the request.
+Both go through the notifier of the session pings. The text names the requester by the label in the settings and the
+variables by name, never a value. The link comes from the settings and the request's id, never from the request.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Final
 
@@ -20,6 +21,8 @@ UNLISTED_REQUESTER: Final = "an unlisted machine"
 KEYGUARD_ORIGIN: Final = "unlock service"
 ACTIONS: Final = {"set": "set", "rm": "remove"}
 WHOLE_ACTIONS: Final = {"list": "list the variable names", "sign": "sign a message"}
+SHOWN_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+MAX_SHOWN_NAMES: Final = 3
 
 
 class KeyguardAnnouncer:
@@ -55,6 +58,16 @@ class KeyguardAnnouncer:
 def _action(request: UnlockRequest) -> str:
     if request.op in WHOLE_ACTIONS:
         return WHOLE_ACTIONS[request.op]
-    count = len(request.vars) if isinstance(request.vars, list) else 0
-    noun = "variable" if count == 1 else "variables"
-    return f"{ACTIONS.get(request.op or '', 'read')} {count} {noun}"
+    return f"{ACTIONS.get(request.op or '', 'read')} {_variables(request.vars)}"
+
+
+def _variables(posted: object) -> str:
+    """Up to three names, then the count of the rest. Only a name that is a variable name shows, since anyone can post."""
+    names = posted if isinstance(posted, list) else []
+    shown = [name for name in names if isinstance(name, str) and SHOWN_NAME.fullmatch(name)][:MAX_SHOWN_NAMES]
+    rest = len(names) - len(shown)
+    if not shown:
+        return f"{rest} {'variable' if rest == 1 else 'variables'}"
+    if rest:
+        return f"{', '.join(shown)} and {rest} more"
+    return shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} and {shown[-1]}"

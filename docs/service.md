@@ -247,7 +247,7 @@ The service tells the same Telegram chat what became of an unlock request when y
 The service sees an expiry in its sweep, every 15 seconds, or in the next call that purges the queue, so the line comes within about 15 seconds of the 5 minutes. An answered request that nobody collected is not an expiry.
 
 ```
-🔐 Waiting for your approval: dev box asks to read 2 variables.
+🔐 Waiting for your approval: dev box asks to read DB_PASSWORD and API_TOKEN.
 
 Approve in Safari
 
@@ -256,13 +256,13 @@ devbox-7f7d78d989-tgd9t
 ```
 
 ```
-❌🔐 Request expired with no answer: dev box asked to read 2 variables.
+❌🔐 Request expired with no answer: dev box asked to read DB_PASSWORD and API_TOKEN.
 
 devbox-7f7d78d989-tgd9t
 [session 4a015f0f (Plan the migration)]
 ```
 
-- The text names the requester by its label in `KEYGUARD_PASSKEY_REQUESTERS` (`an unlisted machine` when the id has none), the operation (`read`, `set`, `remove` or `list the variable names`) and the number of variables. It never names a variable.
+- The text names the requester by its label in `KEYGUARD_PASSKEY_REQUESTERS` (`an unlisted machine` when the id has none), the operation (`read`, `set`, `remove` or `list the variable names`) and the variables by name: up to 3, then the count of the rest, as in `read A, B, C and 2 more`. It names no value, also not the one of a `set`. A name that is not a variable name (a letter or `_`, then letters, digits and `_`, 64 characters at most) only counts, and a request with no such name gives the number, as in `read 2 variables`. Telegram keeps the chat, so the names stay in its history.
 - The link `Approve in Safari` goes to `KEYGUARD_PASSKEY_PUBLIC_URL/approve?id=<id>`. Without that setting the notice has no link. The service builds it from the setting and the id, never from the request. Telegram's own browser cannot use a passkey, hence Safari.
 - The line above the marker holds the request's container, when it has one. It has no session code: the service knows 8 characters of the session, not the UUID. The marker is the first 8 characters of the request's signed `session` field with the request's `title`, as for a ping. A request with no `session` has no marker, its title stays in the line above, and a reply to its notice has no session to continue.
 - These notices do not count against the 20 a minute of `/notify`: the limit on new requests bounds them. A notice that cannot be sent is logged without its text and never fails or delays the request.
