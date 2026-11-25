@@ -44,7 +44,7 @@ Rules for a release that changes the format:
 A repository that must not depend on this one at run time keeps a copy:
 
 ```bash
-python3 tools/vendor.py v0.7.1 ../other-repository/bin
+python3 tools/vendor.py v0.7.2 ../other-repository/bin
 ```
 
 The command takes the files of the tag, not of the working tree. It replaces `bin/keyguard-passkey` and `bin/keyguard_passkey/`, and writes `bin/keyguard_passkey/VENDORED.json` with the tag, the commit and a SHA-256 per file. It refuses a tag whose files hold another version, and a `keyguard_passkey/` folder that has no `VENDORED.json`.
@@ -67,7 +67,7 @@ The check compares files with their line endings normalised, so a Windows checko
 A machine that keeps one file instead of a folder runs the client as a zip application:
 
 ```bash
-python3 tools/vendor.py --pyz v0.7.1 ../other-repository/bin
+python3 tools/vendor.py --pyz v0.7.2 ../other-repository/bin
 ../other-repository/bin/keyguard-passkey.pyz version
 ```
 
@@ -76,7 +76,7 @@ The command packs `keyguard_passkey/` of the tag into `keyguard-passkey.pyz` and
 From v0.3.1, each GitHub release carries this file, packed by the tag's pipeline, with its SHA-256 in the notes. A repository that keeps it can let Renovate bump the tag it pins (datasource `github-releases`, package `emazzotta/keyguard-passkey`) and download the release's file in the same pull request, as a `postUpgradeTasks` command:
 
 ```bash
-curl -fsSL -o bin/keyguard-passkey.pyz https://github.com/emazzotta/keyguard-passkey/releases/download/v0.7.1/keyguard-passkey.pyz
+curl -fsSL -o bin/keyguard-passkey.pyz https://github.com/emazzotta/keyguard-passkey/releases/download/v0.7.2/keyguard-passkey.pyz
 ```
 
 A check in that repository's CI packs the pinned tag again and compares the bytes, so a pull request whose file is not the tag's fails.
