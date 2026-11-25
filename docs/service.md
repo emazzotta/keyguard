@@ -126,6 +126,7 @@ Another proxy needs the same behaviour, and `KEYGUARD_PASSKEY_IDENTITY_HEADER` s
    - The page lists each line with the machine's name and the first and last 8 characters of its key, and one tap pins every line it can.
    - It pins nothing for a line whose id no machine has, whose key is not 32 bytes in base64, that is not an id and a key, or whose id another line names too.
    - A machine with another key pinned keeps it until you tick Replace on its line. A line whose key is already pinned changes nothing.
+   - A request from a machine with no key pinned opens the pin page for that machine first, where "All machines" switches to the paste. Once every line is pinned, the tap goes straight back to the request. With a line left unpinned, the page stays to show what it pinned and why each other line was not, with a link back to the request.
    - The box starts empty. The page never fills it from the service, the link or the keys it holds: a key that came from the service would let a changed service choose whose requests you approve.
 
 4. **A first secret.** `printf %s "$VALUE" | keyguard-passkey set API_TOKEN` prints a link. Open it on the phone and approve. `keyguard-passkey get API_TOKEN` then reads it back the same way.

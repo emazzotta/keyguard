@@ -67,6 +67,11 @@ export const pastePinForm = (transport) => {
     showPinButton()
   }
 
+  const showBack = (next) => {
+    $('back').hidden = !next
+    if (next) $('back').href = next
+  }
+
   $('pins').addEventListener('input', () => {
     replacing.clear()
     showPasted()
@@ -79,6 +84,7 @@ export const pastePinForm = (transport) => {
       $('pins').value = ''
       replacing.clear()
       showPasted()
+      showBack(null)
       setStatus('Paste one line for each machine. Nothing is pinned before you tap.')
     },
     pin: () => {
@@ -90,12 +96,13 @@ export const pastePinForm = (transport) => {
       } catch {
         return setStatus(STORAGE_BLOCKED, 'err')
       }
-      if (next) return location.replace(next)
+      if (next && unpinned === 0) return location.replace(next)
       replacing.clear()
       showPasted()
       const names = chosen.map(({ id }) => transport.label(id)).join(', ')
       const left = unpinned ? ` ${counted(unpinned, 'line')} not pinned, as marked.` : ''
       setStatus(`Pinned ${counted(chosen.length, 'key')}: ${names}.${left}`, 'ok')
+      showBack(next)
     },
   }
 }

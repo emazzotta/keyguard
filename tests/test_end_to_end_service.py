@@ -457,7 +457,7 @@ def test_should_pin_every_pasted_key_with_one_tap(machines):
     machines.page.click("#pin")
     machines.page.wait_for_selector("#status.ok")
 
-    assert machines.pins() == keys
+    assert (machines.pins(), machines.page.is_hidden("#back")) == (keys, True)
 
 
 def test_should_keep_a_differing_pinned_key_until_its_line_is_ticked_to_replace_it(machines):
@@ -512,6 +512,26 @@ def test_should_return_to_the_waiting_request_once_the_pasted_keys_are_pinned(ma
     machines.page.click("#approve", timeout=PAGE_TIMEOUT_MS)
 
     assert asking.finish() == (0, "")
+
+
+def test_should_stay_with_the_result_and_a_link_back_when_a_pasted_line_stays_unpinned(machines):
+    machines.holding_pins({})
+    mac_key = random_key()
+    asking = Asking(machines.service, "set", "SECOND", stdin="two")
+    machines.page.goto(asking.link)
+    machines.page.select_option("#requester", "*")
+    machines.page.fill("#pins", f"{REQUESTER} c2hvcnQ=\nmac {mac_key}")
+
+    machines.page.click("#pin")
+    machines.page.wait_for_selector("#status.ok")
+    shown = (machines.page.eval_on_selector_all("#pin-rows li", ROW_STATES), machines.page.inner_text("#status"))
+    machines.page.click("#back")
+    machines.page.fill("#pubkey", machines.service.public_key)
+    machines.page.click("#pin")
+    machines.page.click("#approve", timeout=PAGE_TIMEOUT_MS)
+
+    assert (shown, machines.pins()["mac"], asking.finish()) == (
+        (["bad-key", "pinned"], "Pinned 1 key: Mac. 1 line not pinned, as marked."), mac_key, (0, ""))
 
 
 @pytest.mark.parametrize("width", LAYOUT_WIDTHS_PX)
