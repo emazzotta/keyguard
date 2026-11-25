@@ -71,6 +71,23 @@ BUMP_RECIPIENT_VERSION = """async (remote) => {
   return written.status
 }"""
 
+WRITE_OWNER_KEY = """async ([remote, pem]) => {
+  const core = await import('/unlock-core.js')
+  const index = await core.readIndex(new Uint8Array(await (await fetch('/store/index.age')).arrayBuffer()), remote)
+  const { files } = await core.writeVariable(index, core.OWNER_KEY_NAME, pem)
+  const { version } = await (await fetch('/store/meta')).json()
+  const written = await fetch('/store/commit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'If-Match': String(version) },
+    body: JSON.stringify({ files, delete: [] }),
+  })
+  return written.status
+}"""
+TARGET = "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57"
+SIGN_ARGS = ("sign", "--target", TARGET, "--box", "macbook", "--title", "Mazzotta-bot")
+OWNER_MESSAGE = "yes, push personal-infra 06be524c\nthen close the session"
+TOKEN_LIFETIME_SECONDS = 600
+
 pytestmark = pytest.mark.spec("docs/service.md")
 
 
@@ -296,6 +313,52 @@ def test_should_offer_nothing_to_approve_for_a_request_signed_too_long_ago(page,
 
     assert page.is_visible("#approve") is False
     assert "may be a replay" in page.inner_text("#status")
+
+
+def from_b64url(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def verified_by(public_pem: Path, token: str, work: Path) -> bool:
+    payload, signature = token.split(".")
+    (work / "payload").write_bytes(from_b64url(payload))
+    (work / "signature").write_bytes(from_b64url(signature))
+    return subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public_pem), "-rawin",
+                           "-in", str(work / "payload"), "-sigfile", str(work / "signature")],
+                          check=False, capture_output=True).returncode == 0
+
+
+@pytest.fixture(scope="module")
+def owner_public_key(page, remote, tmp_path_factory) -> Path:
+    service, identity = remote
+    private, public = ed25519_keypair(tmp_path_factory.mktemp("owner"))
+    page.goto(f"{service.base}/approve?pin={REQUESTER}")
+    assert page.evaluate(WRITE_OWNER_KEY, [identity, private.read_text(encoding="utf-8")]) == 200
+    return public
+
+
+def test_should_answer_absent_for_a_sign_request_while_the_store_lacks_the_owner_key(page, service):
+    assert approved(page, Asking(service, *SIGN_ARGS, stdin="yes, push\n")) == (4, "")
+
+
+def test_should_show_the_message_and_its_target_then_print_the_token_the_owner_key_signed(
+        page, service, owner_public_key, tmp_path):
+    asking = Asking(service, *SIGN_ARGS, stdin=f"{OWNER_MESSAGE}\n")
+    page.goto(asking.link)
+    page.wait_for_selector("#approve:enabled")
+    shown = (page.inner_text("#title"), page.inner_text("#message"), page.inner_text("#target"),
+             page.is_visible("#names-row"))
+
+    page.click("#approve")
+    code, printed = asking.finish()
+
+    token = printed.strip()
+    payload = json.loads(from_b64url(token.split(".")[0]))
+    assert shown == ("Sign a message as you", OWNER_MESSAGE, "Mazzotta-bot (212df38e) on macbook", False)
+    assert (code, printed) == (0, f"{token}\n")
+    assert (payload["text"], payload["to"]) == (OWNER_MESSAGE, {"conversation": TARGET, "box": "macbook"})
+    assert payload["exp"] - payload["iat"] == TOKEN_LIFETIME_SECONDS
+    assert verified_by(owner_public_key, token, tmp_path)
 
 
 def test_should_ask_before_trusting_a_changed_recipient_set(page, remote):

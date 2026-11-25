@@ -30,6 +30,7 @@ from .hold import (
 )
 from .service import client, connection, pending
 from .service.asking import ServiceAsk, UsageError
+from .service.message import OwnerMessage
 from .service.server import serve
 from .service.settings import SettingsError, settings_from_env
 from .store import Store
@@ -135,6 +136,11 @@ def build_parser() -> Parser:
     runner = verbs.add_parser(EXEC_VERB, help="run COMMAND with the secrets in its environment",
                               usage=f"{PROGRAM} {EXEC_VERB} NAME... -- COMMAND...")
     runner.add_argument("names", nargs="+", type=variable_name)
+    signer = verbs.add_parser("sign", help="print a token of a message from standard input, signed as the owner "
+                                           "on the approving device, for one session")
+    signer.add_argument("--target", required=True, help="the session's full conversation id")
+    signer.add_argument("--box", required=True, help="the session's box, as the web terminal names it")
+    signer.add_argument("--title", default="", help="the session's title, shown to the approver")
     verbs.add_parser("lock", help="drop the values held from earlier approvals")
     verbs.add_parser("version", help="print the version")
     verbs.add_parser("verify-install", help="check a vendored copy of this client against its manifest")
@@ -182,9 +188,9 @@ def checked(answer: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def request_for(app: App, op: Op, names: tuple[str, ...] = (), values: dict[str, str] | None = None,
-                force: bool = False) -> Request:
+                force: bool = False, message: OwnerMessage | None = None) -> Request:
     return Request(op=op, names=names, values=values or {}, force=force,
-                   session=app.environ.get(SESSION_ENV, ""), title=app.environ.get(TITLE_ENV, ""))
+                   session=app.environ.get(SESSION_ENV, ""), title=app.environ.get(TITLE_ENV, ""), message=message)
 
 
 def require_store(app: App) -> None:
@@ -335,6 +341,20 @@ def run_exec(app: App, args: argparse.Namespace) -> int:
         raise Failure(f"command not found: {args.command[0]}", EXIT_COMMAND_NOT_FOUND) from None
 
 
+def run_sign(app: App, args: argparse.Namespace) -> int:
+    if app.service is None:
+        raise Failure("sign works only through the unlock service, whose approve page holds the owner key", EXIT_USAGE)
+    message = OwnerMessage(app.stdin.read().removesuffix("\n"), args.target, args.box, args.title)
+    problem = message.problem()
+    if problem:
+        raise Failure(problem, EXIT_USAGE)
+    token = checked(app.ask(request_for(app, Op.SIGN, message=message))).get("token")
+    if not isinstance(token, str):
+        raise Failure("the browser answered without a token", EXIT_UNAVAILABLE)
+    app.stdout.write(f"{token}\n")
+    return 0
+
+
 def run_lock(app: App, _: argparse.Namespace) -> int:
     forget(app, None)
     app.say("Dropped every held value of this store.")
@@ -384,7 +404,7 @@ def run_serve(app: App, _: argparse.Namespace) -> int:
 
 VERBS: Final[dict[str, Callable[[App, argparse.Namespace], int]]] = {
     "init": run_init, "get": run_get, "list": run_list, "set": run_set, "rm": run_rm,
-    "import": run_import, EXEC_VERB: run_exec, "lock": run_lock, "version": run_version,
+    "import": run_import, EXEC_VERB: run_exec, "sign": run_sign, "lock": run_lock, "version": run_version,
     "verify-install": run_verify_install, "serve": run_serve, "pending": run_pending,
 }
 

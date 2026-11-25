@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="./unlock.css">
 <link rel="modulepreload" href="./page.js">
 <link rel="modulepreload" href="./unlock-core.js">
+<link rel="modulepreload" href="./owner-message.js">
 <link rel="modulepreload" href="./typage.js">
 </head>
 <body>
@@ -43,7 +44,9 @@
         <dt>Asking session</dt>
         <dd><span id="session-title" class="session-title"></span> <code id="session-id"></code></dd>
       </div>
-      <div><dt id="names-label">Secrets</dt><dd><ul class="chips" id="names"></ul></dd></div>
+      <div id="target-row" hidden><dt>To</dt><dd id="target" class="session-title"></dd></div>
+      <div id="message-row" hidden><dt>Message</dt><dd><p id="message" class="message"></p></dd></div>
+      <div id="names-row"><dt id="names-label">Secrets</dt><dd><ul class="chips" id="names"></ul></dd></div>
     </dl>
     <p class="age" id="age" hidden></p>
     <button id="approve" class="primary" disabled>Approve with passkey</button>

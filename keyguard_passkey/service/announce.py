@@ -19,6 +19,7 @@ APPROVE_PATH: Final = "/approve?id="
 UNLISTED_REQUESTER: Final = "an unlisted machine"
 KEYGUARD_ORIGIN: Final = "unlock service"
 ACTIONS: Final = {"set": "set", "rm": "remove"}
+WHOLE_ACTIONS: Final = {"list": "list the variable names", "sign": "sign a message"}
 
 
 class KeyguardAnnouncer:
@@ -52,8 +53,8 @@ class KeyguardAnnouncer:
 
 
 def _action(request: UnlockRequest) -> str:
-    if request.op == "list":
-        return "list the variable names"
+    if request.op in WHOLE_ACTIONS:
+        return WHOLE_ACTIONS[request.op]
     count = len(request.vars) if isinstance(request.vars, list) else 0
     noun = "variable" if count == 1 else "variables"
     return f"{ACTIONS.get(request.op or '', 'read')} {count} {noun}"

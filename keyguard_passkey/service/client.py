@@ -20,6 +20,7 @@ from tempfile import TemporaryDirectory
 from typing import Final
 
 from .hint import HINT_FIELD, NotifyHint
+from .message import OWNER_KEY_NAME, OWNER_KEY_REFUSED, SIGN_OP, OwnerMessage, carries
 from .requests import HIDDEN_TITLE_CATEGORIES, MAX_TITLE_CHARS, SESSION_ID
 
 DEFAULT_TIMEOUT_SECONDS: Final = 300
@@ -173,6 +174,14 @@ def list_request_for(signer: Signer, recipient: str, caller: Caller = NO_CALLER)
     return signer.request([], recipient, caller, op=LIST_OP)
 
 
+def sign_request_for(signer: Signer, message: OwnerMessage, recipient: str,
+                     caller: Caller = NO_CALLER) -> UnlockRequest:
+    problem = message.problem()
+    if problem:
+        raise UnlockError(problem)
+    return signer.request([], recipient, caller, op=SIGN_OP, **message.fields())
+
+
 def seal_to(recipient: str, plaintext: bytes) -> str:
     try:
         return base64.b64encode(run_tool(["age", "-r", recipient], plaintext)).decode()
@@ -184,6 +193,8 @@ def validate_names(names: list[str]) -> None:
     invalid = [name for name in names if not VARIABLE_NAME.fullmatch(name)]
     if invalid:
         raise UnlockError(f"not valid variable names: {', '.join(invalid)}")
+    if OWNER_KEY_NAME in names:
+        raise UnlockError(OWNER_KEY_REFUSED)
 
 
 def serialize(body: Body) -> bytes:
@@ -303,6 +314,16 @@ def decrypt_names(response_b64: str, identity: str) -> list[str]:
                                               for name in names):
         raise UnlockError("the approver did not answer with a list of variable names")
     return sorted(names)
+
+
+def decrypt_token(response_b64: str, identity: str, message: OwnerMessage) -> str:
+    """The owner's token, checked to carry exactly the asked message: the page signs only what it showed."""
+    answer = open_response(response_b64, identity)
+    _raise_if_absent(answer, [OWNER_KEY_NAME])
+    token = answer.get(SIGN_OP) if isinstance(answer, dict) and set(answer) == {SIGN_OP} else None
+    if not isinstance(token, str) or not carries(token, message):
+        raise UnlockError("the approver did not answer with a token for exactly this message")
+    return token
 
 
 def _raise_if_absent(answer: object, names: list[str]) -> None:

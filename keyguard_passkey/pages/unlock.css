@@ -139,6 +139,8 @@ h1 {
 
 .host { padding: 0; background: none; }
 
+.message { margin: 0; font-size: 17px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 
 .chips li {

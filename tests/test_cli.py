@@ -10,7 +10,7 @@ import sys
 import time
 
 import pytest
-from conftest import REQUESTER, opened
+from conftest import REQUESTER, opened, owner_token, signs_the_shown_message
 
 from keyguard_passkey import cli, install
 from keyguard_passkey.ceremony import Op
@@ -22,6 +22,7 @@ from keyguard_passkey.store import Store
 SERVICE_URL = "https://unlock.example.test"
 MISSED_ANSWER_TIMEOUT = 5.0
 WAITING_ID = "-bCdEfGh12345678"
+TARGET = "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57"
 
 
 class Asked:
@@ -597,6 +598,48 @@ def test_should_propose_a_value_from_standard_input_through_the_service(service_
 
     assert (code, proposed) == (0, ["rotated"])
     assert "Stored A" in stderr.getvalue()
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_print_the_token_the_approver_signs_through_the_service(service_cli, capsys):
+    code, stderr = service_cli(signs_the_shown_message, "sign", "--target", TARGET, "--box", "macbook", "--title",
+                               "Mazzotta-bot", stdin="yes, push\npersonal-infra 06be524c\n")
+
+    assert (code, capsys.readouterr().out) == (0, owner_token("yes, push\npersonal-infra 06be524c", TARGET,
+                                                              "macbook") + "\n")
+    assert (stderr.seen[0]["op"], stderr.seen[0]["target_title"]) == ("sign", "Mazzotta-bot")
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("argv, stdin, message", [
+    (["--target", "212df38e", "--box", "macbook"], "yes", "full conversation id"),
+    (["--target", TARGET, "--box", "mac book"], "yes", "letters, digits or hyphens"),
+    (["--target", TARGET, "--box", "macbook"], "", "1 to 1000 characters"),
+], ids=["short target", "bad box", "no text"])
+def test_should_refuse_a_message_the_service_would_refuse_before_asking(service_cli, argv, stdin, message):
+    code, stderr = service_cli(signs_the_shown_message, "sign", *argv, stdin=stdin)
+
+    assert code == 64
+    assert message in stderr.getvalue()
+    assert stderr.seen == []
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_report_a_store_without_the_owner_key(service_cli):
+    code, stderr = service_cli(lambda record: {"absent": ["KEYGUARD_OWNER_SIGNING_KEY"]}, "sign", "--target", TARGET,
+                               "--box", "macbook", stdin="yes")
+
+    assert code == 4
+    assert "not in the store: KEYGUARD_OWNER_SIGNING_KEY" in stderr.getvalue()
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_refuse_to_sign_without_the_service(make_app):
+    app, asked = make_app()
+
+    assert run(app, "sign", "--target", TARGET, "--box", "macbook") == 64
+    assert "through the unlock service" in app.stderr.getvalue()
+    assert asked.requests == []
 
 
 @pytest.mark.spec("docs/service.md")

@@ -6,6 +6,7 @@ from contextlib import redirect_stderr
 import pytest
 
 from keyguard_passkey.service.hint import NotifyHint
+from keyguard_passkey.service.message import MAX_MESSAGE_CHARS
 from keyguard_passkey.service.presence import Presence
 from keyguard_passkey.service.requests import (
     MAX_SEALED_VALUE_CHARS,
@@ -150,6 +151,105 @@ def test_should_keep_a_request_without_a_session_free_of_session_fields():
     {"title": ["list"]},
 ])
 def test_should_refuse_a_malformed_session_or_title(over):
+    with pytest.raises(RequestError):
+        RequestQueue().create(payload(**over))
+
+
+CLAUDE_TARGET = "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57"
+
+
+def sign_payload(**over: object) -> dict[str, object]:
+    return payload(**{"vars": [], "op": "sign", "text": "yes, push personal-infra 06be524c", "target": CLAUDE_TARGET,
+                      "target_box": "macbook", **over})
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_hand_both_sides_a_sign_request_with_its_message():
+    queue = RequestQueue()
+    request_id = queue.create(sign_payload(target_title=TITLE))
+
+    peeked, read = queue.peek(request_id), queue.get(request_id)
+
+    expected = {"op": "sign", "vars": [], "text": "yes, push personal-infra 06be524c", "target": CLAUDE_TARGET,
+                "target_box": "macbook", "target_title": TITLE}
+    assert {key: peeked[key] for key in expected} == expected
+    assert {key: read[key] for key in expected} == expected
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("over", [
+    {"text": "two\nlines"},
+    {"text": "x" * MAX_MESSAGE_CHARS},
+    {"target": "ses_" + "a1B2" * 7},
+    {"target": "agy_" + CLAUDE_TARGET},
+    {"target_box": "dev-box-2"},
+])
+def test_should_accept_each_kind_of_message_and_target(over):
+    queue = RequestQueue()
+
+    assert queue.peek(queue.create(sign_payload(**over)))["op"] == "sign"
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_other_requests_free_of_message_fields():
+    queue = RequestQueue()
+
+    assert {"text", "target", "target_box", "target_title"}.isdisjoint(queue.peek(queue.create(payload())))
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("over", [
+    {"text": ""},
+    {"text": "x" * (MAX_MESSAGE_CHARS + 1)},
+    {"text": "tab\there"},
+    {"text": "carriage\rreturn"},
+    {"text": "bidi \u202e override"},
+    {"text": "zero\u200bwidth"},
+    {"text": "line\u2028separator"},
+    {"text": "private \ue000 use"},
+    {"text": ["yes"]},
+    {"text": None},
+    {"target": None},
+    {"target": "212df38e"},
+    {"target": CLAUDE_TARGET.upper()},
+    {"target": "ses_short"},
+    {"target": "agy_212df38e"},
+    {"target_box": None},
+    {"target_box": ""},
+    {"target_box": "x" * 64},
+    {"target_box": "mac book"},
+    {"target_title": ""},
+    {"target_title": "line\nbreak"},
+    {"vars": ["A"]},
+    {"value": "x"},
+])
+def test_should_refuse_a_malformed_sign_request(over):
+    with pytest.raises(RequestError):
+        RequestQueue().create(sign_payload(**over))
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("over", [
+    {"vars": ["A", "KEYGUARD_OWNER_SIGNING_KEY"]},
+    {"op": "set", "vars": ["KEYGUARD_OWNER_SIGNING_KEY"], "value": "x"},
+    {"op": "rm", "vars": ["KEYGUARD_OWNER_SIGNING_KEY"]},
+], ids=["get", "set", "rm"])
+def test_should_refuse_a_request_that_names_the_owner_key(over):
+    with pytest.raises(RequestError, match="never released, written or removed"):
+        RequestQueue().create(payload(**over))
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("op", [None, "set", "rm", "list"])
+def test_should_refuse_message_fields_on_any_other_request(op):
+    over: dict[str, object] = {"text": "yes"} if op is None else {"op": op, "text": "yes"}
+    if op in ("set", "rm"):
+        over["vars"] = ["A"]
+    if op == "set":
+        over["value"] = "x"
+    if op == "list":
+        over["vars"] = []
+
     with pytest.raises(RequestError):
         RequestQueue().create(payload(**over))
 

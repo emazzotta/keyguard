@@ -17,6 +17,16 @@ from dataclasses import dataclass
 from typing import Final, Protocol
 
 from .hint import HINT_FIELD, NotifyHint, parse_hint
+from .message import (
+    MAX_MESSAGE_CHARS,
+    MESSAGE_FIELDS,
+    OWNER_KEY_NAME,
+    OWNER_KEY_REFUSED,
+    SIGN_OP,
+    is_box,
+    is_message_text,
+    is_target,
+)
 
 REQUEST_TTL_SECONDS: Final = 300
 REQUEST_ID_BYTES: Final = 16
@@ -25,7 +35,7 @@ CALLER_FIELDS: Final = ("session", "title")
 SESSION_ID: Final = re.compile(r"[0-9A-Za-z]{8}")
 MAX_TITLE_CHARS: Final = 80
 HIDDEN_TITLE_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
-REQUEST_OPS: Final = frozenset({"set", "rm", "list"})
+REQUEST_OPS: Final = frozenset({"set", "rm", "list", SIGN_OP})
 MAX_SEALED_VALUE_CHARS: Final = 64 * 1024
 DEFAULT_RATE_LIMIT: Final = 30
 RATE_WINDOW_SECONDS: Final = 60.0
@@ -79,10 +89,14 @@ class UnlockRequest:
     session: str | None = None
     title: str | None = None
     hint: NotifyHint | None = None
+    text: str | None = None
+    target: str | None = None
+    target_box: str | None = None
+    target_title: str | None = None
 
     def _signed_view(self) -> dict[str, object]:
         view: dict[str, object] = {field: getattr(self, field) for field in REQUEST_FIELDS}
-        for field in ("op", "value", *CALLER_FIELDS):
+        for field in ("op", "value", *CALLER_FIELDS, *MESSAGE_FIELDS):
             if getattr(self, field) is not None:
                 view[field] = getattr(self, field)
         return view
@@ -96,15 +110,17 @@ class UnlockRequest:
 
 def op_fields(payload: dict[str, object]) -> tuple[str | None, str | None]:
     op, value, names = payload.get("op"), payload.get("value"), payload["vars"]
+    if isinstance(names, list) and OWNER_KEY_NAME in names:
+        raise RequestError(OWNER_KEY_REFUSED)
     if op is None:
         if value is not None:
             raise RequestError("a sealed value needs op set")
         return None, None
     if not isinstance(op, str) or op not in REQUEST_OPS:
         raise RequestError(f"unknown op: {op}")
-    if op == "list":
+    if op in ("list", SIGN_OP):
         if names or value is not None:
-            raise RequestError("list names no variable and carries no value")
+            raise RequestError(f"{op} names no variable and carries no value")
         return op, None
     if not isinstance(names, list) or len(names) != 1:
         raise RequestError(f"{op} takes exactly one variable")
@@ -126,6 +142,22 @@ def caller_fields(payload: dict[str, object]) -> tuple[str | None, str | None]:
     if title is not None and not (isinstance(title, str) and is_display_title(title)):
         raise RequestError(f"title must be 1 to {MAX_TITLE_CHARS} visible characters")
     return session, title
+
+
+def message_fields(payload: dict[str, object], op: str | None) -> dict[str, str]:
+    found = {field: payload[field] for field in MESSAGE_FIELDS if payload.get(field) is not None}
+    if op != SIGN_OP:
+        if found:
+            raise RequestError(f"only a {SIGN_OP} request carries a message")
+        return {}
+    if not is_message_text(found.get("text")):
+        raise RequestError(f"the message must be 1 to {MAX_MESSAGE_CHARS} characters without hidden characters")
+    if not is_target(found.get("target")) or not is_box(found.get("target_box")):
+        raise RequestError("a message names its target's full conversation id and box")
+    title = found.get("target_title")
+    if title is not None and not (isinstance(title, str) and is_display_title(title)):
+        raise RequestError(f"target_title must be 1 to {MAX_TITLE_CHARS} visible characters")
+    return {field: str(value) for field, value in found.items()}
 
 
 def is_display_title(title: str) -> bool:
@@ -168,13 +200,14 @@ class RequestQueue:
             raise RequestError(f"request missing fields: {', '.join(missing)}")
         op, value = op_fields(payload)
         session, title = caller_fields(payload)
+        message = message_fields(payload, op)
         with self._lock:
             self._creations.take()
             request_id = secrets.token_urlsafe(REQUEST_ID_BYTES)
             request = UnlockRequest(
                 id=request_id, vars=payload["vars"], host=payload["host"], eph_pubkey=payload["eph_pubkey"],
                 ts=payload["ts"], sig=payload["sig"], created_at=self._now(), op=op, value=value,
-                session=session, title=title, hint=parse_hint(payload.get(HINT_FIELD)))
+                session=session, title=title, hint=parse_hint(payload.get(HINT_FIELD)), **message)
             self._requests[request_id] = request
         self._tell(self._events.created, request)
         return request_id

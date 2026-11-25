@@ -279,8 +279,72 @@ Mac keyguard · devbox-7f7d78d989-tgd9t
 - The message has no heading and opens with `❌🔐`. The code of the session appears only for a full UUID, and the marker only when the body names a session. A body with no session, title and container is the text alone.
 - The service refuses `keyguard_wait` with `400`: only the service posts it, because it decides from the presence. Post a failure line only for a request that this service does not hold, or the chat gets two.
 
+## Owner Signatures
+
+A requester can ask you to sign a short message as the owner, such as `yes, push personal-infra 06be524c`, for one Claude Code session that waits for your yes. The approve page signs it with the owner key. Only the page and the Mac's keyguard can decrypt that key, and no read releases it. The session checks the signature against the pinned public key before it acts on the text.
+
+```mermaid
+sequenceDiagram
+    participant M as Master session<br/>fleet send --as-owner
+    participant R as Requester<br/>keyguard-passkey sign
+    participant S as Unlock service
+    participant P as Approve page<br/>phone or web terminal
+    participant W as Worker session
+    M->>R: text, target conversation, its box and title
+    R->>S: POST /requests with op sign, signed with the requester key
+    P->>S: opens the link, loads the request and the store
+    P->>P: shows the text, the target and its box
+    P->>P: the passkey unlocks the store, the page decrypts the owner key,<br/>stamps nonce, iat and exp, signs
+    P->>S: the token, sealed to the one-time key
+    S-->>R: the sealed answer
+    R-->>M: the token
+    M->>W: the web terminal pastes the text and the token line
+    W->>W: checks signature, addressee, expiry and nonce
+```
+
+### The Request
+
+`POST /requests` with `op` `sign`, an empty `vars` and these fields, which the requester signs with the others:
+
+| Field | Value |
+|---|---|
+| `text` | The message: 1 to 1000 characters. Line breaks are allowed; other control characters and format, private-use, surrogate and separator characters are not |
+| `target` | The full conversation id of the session it is for: a Claude Code UUID, an opencode `ses_` id or `agy_` and an agy UUID |
+| `target_box` | That session's box as the web terminal names it: 1 to 63 letters, digits or hyphens |
+| `target_title` | Optional: its title, under the rules of `title` |
+
+The service answers `400` to any other shape, a `value` included. The page refuses a request that breaks these rules, since it could not show it whole.
+
+### The Page
+
+- It shows `Sign a message as you`, the asking machine and session as for any request, the whole text with its line breaks, and `To <target_title> (<first 8 characters of target>) on <target_box>`.
+- Approve unlocks the store with the passkey and decrypts `KEYGUARD_OWNER_SIGNING_KEY`, an Ed25519 private key in PKCS #8 PEM. The page builds the payload, signs it and answers the token, sealed to the request's one-time key. The answer holds nothing else, and one approval signs one payload.
+- A store without the key gets the answer `absent` with `KEYGUARD_OWNER_SIGNING_KEY`, and the client exits 4, as `get` does for a missing name.
+
+### The Token
+
+`<payload>.<signature>`, both base64url without padding. The payload is the UTF-8 JSON that the page wrote, signed as these exact bytes:
+
+```json
+{"v":1,"text":"yes, push personal-infra 06be524c","to":{"conversation":"212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57","box":"macbook"},"nonce":"q8Xz3VYc0mJr2t9bWk1fLg","iat":1795000000,"exp":1795000600}
+```
+
+- The requester supplies `text` and `to`. The page sets `nonce` (16 random bytes), `iat` (the moment you approve) and `exp` (`iat` + 600 s) itself.
+- `target_title` stays out: it helps you recognise the session and proves nothing.
+- A checker accepts the token only when the signature matches the pinned owner key, `to.conversation` is its own conversation, `iat` is at most 60 s ahead of its clock, `exp` lies in the future and at most 600 s after `iat`, and it has not seen the `nonce` before.
+
+### The Owner Key
+
+- `KEYGUARD_OWNER_SIGNING_KEY` is a variable of the store that no read releases. The client and the service refuse a `get`, `set` or `rm` request that names it, and the page refuses it in each of those approvals (`exec` included), so a session can neither read nor replace it. `list` names it.
+- The Mac's keyguard refuses it the same way and creates it (keyguard `README.md`, Owner Signatures).
+
+### The Client
+
+`keyguard-passkey sign --target <id> --box <box> [--title <title>]` reads the text on standard input, asks as above and prints the token. Its exit codes are those of `get`. `pending` lists a sign request with its `text`, `target`, `target_box` and `target_title`, and an empty `vars`. The keyguard notices name the operation `sign a message`.
+
 ## Limits
 
 - The service serves the pages. Whoever can change the service's files or image can change the code that decrypts on your phone. The pinned keys stop a forged request, not a changed page. Run the image of a release tag, and keep the service where only you can change it.
 - A copy of the store folder holds encrypted files only. It opens with the passkey or with the paper passphrase.
 - The pins live in one browser's storage. A new phone, or a cleared browser, pins each machine again.
+- A sign request shows the target's title as the requester sent it. The checker binds the conversation id, not the title.

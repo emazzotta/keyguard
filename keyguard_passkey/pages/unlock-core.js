@@ -23,7 +23,8 @@ export const unpad = (bytes) => {
 }
 
 // Sorted as the client's sort_keys serialisation signs them; a request signs only the fields it carries.
-const SIGNED_FIELDS = ['eph_pubkey', 'host', 'op', 'session', 'title', 'ts', 'value', 'vars']
+const SIGNED_FIELDS = ['eph_pubkey', 'host', 'op', 'session', 'target', 'target_box', 'target_title', 'text', 'title',
+  'ts', 'value', 'vars']
 
 const isPresent = (value) => value !== undefined && value !== null
 
@@ -95,6 +96,18 @@ export class AbsentNames extends Error {
   }
 }
 
+export const OWNER_KEY_NAME = 'KEYGUARD_OWNER_SIGNING_KEY'
+
+export class OwnerKeyRefused extends Error {
+  constructor () {
+    super(`${OWNER_KEY_NAME} is never released, written or removed: it only signs a message you approve`)
+  }
+}
+
+const refuseOwnerKey = (names) => {
+  if (names.includes(OWNER_KEY_NAME)) throw new OwnerKeyRefused()
+}
+
 const requirePresent = (index, names) => {
   const absent = names.filter((name) => !Object.hasOwn(index.entries, name))
   if (absent.length) throw new AbsentNames(absent)
@@ -102,8 +115,7 @@ const requirePresent = (index, names) => {
 
 export const listNames = (index) => Object.keys(index.entries).sort()
 
-export const resolveValues = async (names, remoteIdentity, fetchStoreFile, readAlready = null) => {
-  const index = readAlready ?? await readIndex(await fetchStoreFile(INDEX_FILE), remoteIdentity)
+const decryptValues = async (index, names, remoteIdentity, fetchStoreFile) => {
   requirePresent(index, names)
   const values = {}
   for (const name of names) {
@@ -114,6 +126,15 @@ export const resolveValues = async (names, remoteIdentity, fetchStoreFile, readA
   }
   return values
 }
+
+export const resolveValues = async (names, remoteIdentity, fetchStoreFile, readAlready = null) => {
+  refuseOwnerKey(names)
+  const index = readAlready ?? await readIndex(await fetchStoreFile(INDEX_FILE), remoteIdentity)
+  return decryptValues(index, names, remoteIdentity, fetchStoreFile)
+}
+
+export const readOwnerKey = async (index, remoteIdentity, fetchStoreFile) =>
+  (await decryptValues(index, [OWNER_KEY_NAME], remoteIdentity, fetchStoreFile))[OWNER_KEY_NAME]
 
 export const sealResponse = async (values, ephRecipient) => {
   const age = await loadAge()
@@ -188,6 +209,7 @@ export const writeVariable = async (index, name, value) => {
 }
 
 export const planWrites = async (index, names, values, force) => {
+  refuseOwnerKey(names)
   let current = index
   const files = {}
   const written = []
@@ -206,6 +228,7 @@ export const planWrites = async (index, names, values, force) => {
 }
 
 export const removeVariable = async (index, name) => {
+  refuseOwnerKey([name])
   requirePresent(index, [name])
   const entry = index.entries[name]
   const entries = Object.fromEntries(Object.entries(index.entries).filter(([key]) => key !== name))

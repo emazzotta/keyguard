@@ -204,7 +204,19 @@ def test_should_list_only_the_public_fields_oldest_first(tmp_path):
     assert [record["id"] for record in listed] == ["Earlier00000001", "Later0000000001"]
     assert set(listed[0]) == set(pending.PUBLIC_FIELDS)
     assert set(pending.PUBLIC_FIELDS) == {"id", "vars", "op", "state", "host", "link", "session", "title", "pane",
-                                          "created"}
+                                          "created", "text", "target", "target_box", "target_title"}
+
+
+def test_should_show_the_message_of_a_sign_request_in_the_snapshot(tmp_path):
+    message = {"text": "yes, push", "target": "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57", "target_box": "macbook",
+               "target_title": "Mazzotta-bot"}
+    signing = pending.Request(id=REQUEST_ID, vars=(), op="sign", host="devbox", link=LINK, **message)
+
+    with pending.announced(signing, tmp_path, now=lambda: NOW):
+        [listed] = pending.snapshot(tmp_path, NOW)
+
+    assert {key: listed[key] for key in message} == message
+    assert (listed["op"], listed["vars"]) == ("sign", [])
 
 
 def test_should_name_the_asking_session_in_the_record_and_the_snapshot(tmp_path):

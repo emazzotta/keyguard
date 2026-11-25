@@ -8,12 +8,13 @@ import time
 import urllib.error
 
 import pytest
-from conftest import REQUEST_TOKEN, REQUESTER, opened
+from conftest import REQUEST_TOKEN, REQUESTER, opened, owner_token, signs_the_shown_message
 
 from keyguard_passkey.ceremony import Op, Request
 from keyguard_passkey.service import asking, client, pending
 from keyguard_passkey.service.asking import ServiceAsk, UsageError
 from keyguard_passkey.service.hint import NotifyHint
+from keyguard_passkey.service.message import OwnerMessage
 from keyguard_passkey.service.presence import Presence
 
 SESSION = "48f92bcb"
@@ -36,8 +37,48 @@ def make_ask(unlock_service, phone, tmp_path):
     return _make
 
 
-def request(op, names=(), values=None, session=SESSION, title=TITLE):
-    return Request(op=op, names=tuple(names), values=values or {}, force=True, session=session, title=title)
+def request(op, names=(), values=None, session=SESSION, title=TITLE, message=None):
+    return Request(op=op, names=tuple(names), values=values or {}, force=True, session=session, title=title,
+                   message=message)
+
+
+MESSAGE = OwnerMessage(text="yes, push personal-infra 06be524c", target="212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57",
+                       box="macbook", title="Mazzotta-bot")
+
+
+def test_should_answer_the_token_the_approver_signs_for_the_message(make_ask):
+    ask = make_ask(signs_the_shown_message)
+
+    answer = ask(request(Op.SIGN, message=MESSAGE))
+
+    assert answer == {"token": owner_token(MESSAGE.text, MESSAGE.target, MESSAGE.box)}
+    [seen] = ask.stderr.seen
+    assert (seen["op"], seen["vars"], seen["text"], seen["target_title"]) == ("sign", [], MESSAGE.text, "Mazzotta-bot")
+
+
+def test_should_record_the_message_of_a_waiting_sign_request(make_ask):
+    states = []
+    ask = make_ask(lambda record: states.append(recorded(ask)) or signs_the_shown_message(record))
+
+    ask(request(Op.SIGN, message=MESSAGE))
+
+    [[waiting]] = states
+    assert (waiting["op"], waiting["vars"], waiting["text"], waiting["target"], waiting["target_box"],
+            waiting["target_title"]) == ("sign", [], MESSAGE.text, MESSAGE.target, "macbook", "Mazzotta-bot")
+
+
+def test_should_answer_absent_when_the_store_lacks_the_owner_key(make_ask):
+    ask = make_ask(lambda record: {"absent": ["KEYGUARD_OWNER_SIGNING_KEY"]})
+
+    assert ask(request(Op.SIGN, message=MESSAGE)) == {"absent": ["KEYGUARD_OWNER_SIGNING_KEY"]}
+
+
+def test_should_shorten_a_target_title_the_service_would_refuse(make_ask):
+    ask = make_ask(signs_the_shown_message)
+
+    ask(request(Op.SIGN, message=OwnerMessage(MESSAGE.text, MESSAGE.target, "macbook", title="two\nlines")))
+
+    assert ask.stderr.seen[0]["target_title"] == "two lines"
 
 
 def recorded(ask: ServiceAsk) -> list[dict[str, object]]:
@@ -103,7 +144,11 @@ def test_should_remove_one_name(make_ask, answer, expected):
     ({"remote_recipient": ""}, request(Op.SET, ["A"], {"A": "v"}), "--remote-recipient"),
     ({}, request(Op.SET, ["A", "B"], {"A": "1", "B": "2"}), "one name per approval"),
     ({}, request(Op.RM, ["A", "B"]), "one name per approval"),
-], ids=["init", "no requester", "no remote recipient", "set of two", "rm of two"])
+    ({}, request(Op.SIGN), "names the message"),
+    ({}, request(Op.SIGN, message=OwnerMessage("", MESSAGE.target, "macbook")), "1 to 1000 characters"),
+    ({}, request(Op.SIGN, message=OwnerMessage("ok", "212df38e", "macbook")), "full conversation id"),
+], ids=["init", "no requester", "no remote recipient", "set of two", "rm of two", "sign without a message",
+        "empty message", "short target"])
 def test_should_refuse_what_the_service_cannot_take_before_asking(make_ask, overrides, asked, message):
     ask = make_ask(**overrides)
 

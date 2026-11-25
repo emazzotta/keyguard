@@ -66,6 +66,7 @@ Keep the paper passphrase away from the machine. It opens the store when the pas
 | `rm NAME` | Removes a secret |
 | `import FILE [--force]` | Stores every `NAME=value` line of a `.env` file, or of standard input when `FILE` is `-` |
 | `exec NAME... -- COMMAND` | Runs `COMMAND` with the secrets in its environment |
+| `sign --target ID --box BOX [--title TITLE]` | Prints a token of the message on standard input, signed with the owner key for one session; service mode only ([docs/service.md](docs/service.md#owner-signatures)) |
 | `lock` | Drops the values held from earlier approvals |
 | `version` | Prints the version |
 | `pending` | Prints this machine's service requests that wait for an approval; `--watch` streams them |

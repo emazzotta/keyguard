@@ -107,6 +107,23 @@ describe('request signatures', () => {
     expect(await core.verifyRequest({ ...withCaller.request, session: undefined }, callerKey)).toBe(false)
   })
 
+  /** @useCase docs/service.md scenario="The Request" */
+  test('should serialize a sign request byte for byte as the client signs it, its message included', async () => {
+    const signing = V.sign_request
+
+    expect(core.b64encode(core.canonicalRequestBytes(signing.request))).toBe(signing.canonical_signed_bytes_b64)
+    expect(await core.verifyRequest(signing.request, core.b64decode(signing.requester_pubkey_b64))).toBe(true)
+  })
+
+  /** @useCase docs/service.md scenario="The Request" */
+  test.each([['text', 'yes, push everything'], ['target', `ses_${'a'.repeat(26)}`], ['target_box', 'devbox'],
+    ['target_title', 'Harmless chore']])('should reject a sign request whose %s was changed', async (field, value) => {
+    const signing = V.sign_request
+
+    expect(await core.verifyRequest({ ...signing.request, [field]: value }, core.b64decode(signing.requester_pubkey_b64)))
+      .toBe(false)
+  })
+
   /** @useCase docs/service.md */
   test('should read a null session from the service as no session', () => {
     const fromService = core.canonicalRequestBytes({ ...plain.request, session: null, title: null })
@@ -189,6 +206,31 @@ describe('reading values', () => {
     expect(absent).toBeInstanceOf(core.AbsentNames)
     expect([absent.names, absent.message, fetched]).toEqual([['NOPE', 'GONE'], 'NOPE, GONE are not in the store',
       ['index.age']])
+  })
+
+  /** @useCase docs/service.md scenario="The Owner Key" */
+  test('should refuse to release the owner key without reading the store', async () => {
+    const fetched = []
+
+    const refused = await failure(() => core.resolveValues(['JIRA_TOKEN', core.OWNER_KEY_NAME], V.remote_identity,
+      (path) => { fetched.push(path); return fetchStoreFile(path) }))
+
+    expect([refused instanceof core.OwnerKeyRefused, fetched]).toEqual([true, []])
+  })
+
+  /** @useCase docs/service.md scenario="The Owner Key" */
+  test('should read the owner key only to sign with it', async () => {
+    const stored = await core.writeVariable(index, core.OWNER_KEY_NAME, V.owner_token.private_key_pem)
+    const files = (path) => (path in stored.files ? core.b64decode(stored.files[path]) : fetchStoreFile(path))
+
+    expect(await core.readOwnerKey(stored.index, V.remote_identity, files)).toBe(V.owner_token.private_key_pem)
+  })
+
+  /** @useCase docs/service.md scenario="The Owner Key" */
+  test('should name the owner key absent when the store lacks it', async () => {
+    const absent = await failure(() => core.readOwnerKey(index, V.remote_identity, fetchStoreFile))
+
+    expect([absent instanceof core.AbsentNames, absent.names]).toEqual([true, [core.OWNER_KEY_NAME]])
   })
 
   /** @useCase docs/service.md */
@@ -308,6 +350,14 @@ describe('writing values', () => {
     expect([forced.written, Object.keys(forced.files)]).toEqual([['JIRA_TOKEN'], [index.entries.JIRA_TOKEN.file]])
   })
 
+  /** @useCase docs/service.md scenario="The Owner Key" */
+  test.each([true, false])('should refuse to write the owner key, forced or not (%s)', async (force) => {
+    const refused = await failure(() => core.planWrites(index, ['FRESH', core.OWNER_KEY_NAME],
+      { FRESH: 'x', [core.OWNER_KEY_NAME]: 'pem' }, force))
+
+    expect(refused).toBeInstanceOf(core.OwnerKeyRefused)
+  })
+
   /** @useCase docs/service.md */
   test('should plan no file when every name is kept', async () => {
     const plan = await core.planWrites(index, ['JIRA_TOKEN'], { JIRA_TOKEN: 'x' }, false)
@@ -326,6 +376,13 @@ describe('removing values', () => {
     expect(removal.deletes).toEqual([index.entries.JIRA_TOKEN.file])
     expect([Object.keys(shrunk.entries).sort(), shrunk.salt]).toEqual([['GITHUB_TOKEN', 'MULTILINE'], index.salt])
     expect(stanzas(removal.files['index.age'])).toBe(everyRecipient(index))
+  })
+
+  /** @useCase docs/service.md scenario="The Owner Key" */
+  test('should refuse to remove the owner key', async () => {
+    const stored = await core.writeVariable(index, core.OWNER_KEY_NAME, 'pem')
+
+    expect(await failure(() => core.removeVariable(stored.index, core.OWNER_KEY_NAME))).toBeInstanceOf(core.OwnerKeyRefused)
   })
 
   /** @useCase docs/service.md */

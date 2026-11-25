@@ -8,11 +8,12 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from conftest import REQUEST_TOKEN, REQUESTER, ed25519_keypair, opened, sealed_to, verified
+from conftest import REQUEST_TOKEN, REQUESTER, ed25519_keypair, opened, owner_token, sealed_to, verified
 
 from keyguard_passkey.service import client, requests
 from keyguard_passkey.service.client import Caller, Cancelled, RequestGone, Signer, UnlockError, UnlockTimeout
 from keyguard_passkey.service.hint import NotifyHint
+from keyguard_passkey.service.message import OwnerMessage
 from keyguard_passkey.service.presence import Presence
 
 BEARER = {"Authorization": f"Bearer {REQUEST_TOKEN}"}
@@ -215,6 +216,16 @@ def test_should_name_a_remote_recipient_age_cannot_seal_to(signer):
 
 
 @pytest.mark.parametrize("build", [
+    lambda signer: client.request_for(signer, ["A", "KEYGUARD_OWNER_SIGNING_KEY"], "age1x"),
+    lambda signer: client.set_request_for(signer, "KEYGUARD_OWNER_SIGNING_KEY", "v", "age1x", "age1y"),
+    lambda signer: client.rm_request_for(signer, "KEYGUARD_OWNER_SIGNING_KEY", "age1x"),
+], ids=["get", "set", "rm"])
+def test_should_refuse_to_ask_for_the_owner_key(signer, build):
+    with pytest.raises(UnlockError, match="never released, written or removed"):
+        build(signer)
+
+
+@pytest.mark.parametrize("build", [
     lambda signer: client.set_request_for(signer, "A;rm -rf ~", "v", "age1x", "age1y"),
     lambda signer: client.rm_request_for(signer, "A;rm", "age1x"),
 ], ids=["set", "rm"])
@@ -294,6 +305,87 @@ def test_should_sign_a_removal_or_listing_that_carries_no_value(unlock_service, 
     assert verified(client.serialize(request.body), request.signature, unlock_service.public_key)
 
 
+
+MESSAGE = OwnerMessage(text="yes, push personal-infra 06be524c", target="212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57",
+                       box="macbook", title="Mazzotta-bot")
+
+
+def token_for(text: str = MESSAGE.text, conversation: str = MESSAGE.target, box: str = MESSAGE.box) -> str:
+    return owner_token(text, conversation, box)
+
+
+def test_should_sign_a_message_request_that_names_no_variable(unlock_service, signer):
+    request = client.sign_request_for(signer, MESSAGE, "age1eph")
+
+    assert (request.body["op"], request.body["vars"]) == ("sign", [])
+    assert {name: request.body[name] for name in ("text", "target", "target_box", "target_title")} == {
+        "text": MESSAGE.text, "target": MESSAGE.target, "target_box": "macbook", "target_title": "Mazzotta-bot"}
+    assert verified(client.serialize(request.body), request.signature, unlock_service.public_key)
+
+
+def test_should_serialize_a_sign_request_in_the_order_the_phone_verifies(signer):
+    body = client.sign_request_for(signer, OwnerMessage(text="ok", target=MESSAGE.target, box="devbox"), "age1eph").body
+
+    assert client.serialize(body) == (b'{"eph_pubkey":"age1eph","host":"devbox","op":"sign",'
+                                      b'"target":"212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57","target_box":"devbox",'
+                                      b'"text":"ok","ts":1,"vars":[]}')
+
+
+@pytest.mark.parametrize("message", [
+    OwnerMessage(text="", target=MESSAGE.target, box="macbook"),
+    OwnerMessage(text="tab\there", target=MESSAGE.target, box="macbook"),
+    OwnerMessage(text="ok", target="212df38e", box="macbook"),
+    OwnerMessage(text="ok", target=MESSAGE.target, box="mac book"),
+], ids=["empty", "control character", "short id", "box with a space"])
+def test_should_refuse_to_ask_for_a_message_the_service_would_refuse(signer, message):
+    with pytest.raises(UnlockError):
+        client.sign_request_for(signer, message, "age1eph")
+
+
+def test_should_return_the_token_for_exactly_the_asked_message():
+    ephemeral = client.generate_ephemeral()
+    token = token_for()
+
+    assert client.decrypt_token(sealed_to(ephemeral.recipient, {"sign": token}), ephemeral.identity, MESSAGE) == token
+
+
+@pytest.mark.parametrize("answer", [
+    {"sign": token_for(text="yes, push personal-infra 00000000")},
+    {"sign": token_for(conversation="00000000-7c4b-4a51-9d0e-3f6b2a8c1e57")},
+    {"sign": token_for(box="devbox")},
+    {"sign": "not a token"},
+    {"sign": token_for(), "extra": "x"},
+    {"sign": 1},
+    ["sign"],
+], ids=["other text", "other conversation", "other box", "malformed", "extra key", "not a string", "not an object"])
+def test_should_refuse_a_token_that_is_not_for_exactly_the_asked_message(answer):
+    ephemeral = client.generate_ephemeral()
+
+    with pytest.raises(UnlockError, match="exactly this message"):
+        client.decrypt_token(sealed_to(ephemeral.recipient, answer), ephemeral.identity, MESSAGE)
+
+
+def test_should_report_a_store_without_the_owner_key():
+    ephemeral = client.generate_ephemeral()
+
+    with pytest.raises(client.NotInStore) as raised:
+        client.decrypt_token(sealed_to(ephemeral.recipient, {"absent": ["KEYGUARD_OWNER_SIGNING_KEY"]}),
+                             ephemeral.identity, MESSAGE)
+    assert raised.value.names == ["KEYGUARD_OWNER_SIGNING_KEY"]
+
+
+def test_should_complete_the_sign_flow_through_the_service(unlock_service, signer):
+    ephemeral = client.generate_ephemeral()
+    request_id = client.submit(unlock_service.base, BEARER, client.sign_request_for(signer, MESSAGE, ephemeral.recipient))
+
+    record = unlock_service.approver_view(request_id)
+    assert unlock_service.signature_holds(record) and record["text"] == MESSAGE.text
+    unlock_service.respond(request_id, {"sign": token_for()})
+    response = client.poll(unlock_service.base, BEARER, request_id, timeout=5, interval=0.05)
+
+    assert client.decrypt_token(response, ephemeral.identity, MESSAGE) == token_for()
+
+
 @pytest.mark.parametrize("listed, expected", [(["B_TOKEN", "A_TOKEN"], ["A_TOKEN", "B_TOKEN"]), ([], [])])
 def test_should_return_the_listed_names_sorted(listed, expected):
     ephemeral = client.generate_ephemeral()
@@ -347,7 +439,7 @@ def test_should_serialize_a_title_as_utf8_the_way_the_phone_rebuilds_it(signer):
                                       b'"ts":1,"vars":["A"]}')
 
 
-@pytest.mark.parametrize("case", ["plain_request", "caller_request"])
+@pytest.mark.parametrize("case", ["plain_request", "caller_request", "sign_request"])
 def test_should_serialize_and_sign_the_requests_the_page_test_vectors_verify(case, tmp_path):
     vector = json.loads(PAGE_VECTORS.read_text(encoding="utf-8"))[case]
     body = {name: value for name, value in sorted(vector["request"].items(), reverse=True) if name != "sig"}
@@ -401,7 +493,7 @@ def test_should_carry_the_session_through_the_service_under_the_signature(unlock
 
 
 def test_should_offer_the_service_exactly_the_operations_it_accepts():
-    assert {client.SET_OP, client.RM_OP, client.LIST_OP} == requests.REQUEST_OPS
+    assert {client.SET_OP, client.RM_OP, client.LIST_OP, client.SIGN_OP} == requests.REQUEST_OPS
 
 
 def test_should_name_a_tool_missing_from_the_path(monkeypatch):

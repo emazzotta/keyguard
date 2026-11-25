@@ -133,6 +133,8 @@ def test_should_post_no_failure_line_for_an_answered_request_that_nobody_collect
     ({"vars": ["A"], "op": "set", "value": "c2VhbGVk"}, "set 1 variable"),
     ({"vars": ["A"], "op": "rm"}, "remove 1 variable"),
     ({"vars": [], "op": "list"}, "list the variable names"),
+    ({"vars": [], "op": "sign", "text": "yes", "target": "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57", "target_box": "macbook"},
+     "sign a message"),
 ])
 def test_should_say_what_a_request_asks_by_its_operation_and_count(queue, notifier, over, action):
     queue.create(payload(**over))

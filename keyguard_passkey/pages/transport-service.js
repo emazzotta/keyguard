@@ -1,3 +1,4 @@
+import { messageProblem } from './owner-message.js'
 import * as core from './unlock-core.js'
 import { storeClient, textFile } from './store-client.js'
 
@@ -17,6 +18,7 @@ const SERVICE_ANSWERS = [
   ['names', (outcome) => ({ list: outcome.names })],
   ['written', (outcome) => ({ set: outcome.written[0] })],
   ['removed', (outcome) => ({ rm: outcome.removed })],
+  ['token', (outcome) => ({ sign: outcome.token })],
 ]
 
 export const serviceAnswer = (outcome) => {
@@ -34,6 +36,10 @@ export const freshnessProblem = (record, label, nowSeconds) => {
   return freshness === 'future' ? `This request is dated in the future. Check the clock of the ${label}, then ask again.` : null
 }
 
+const messageOf = (record) => (record.op === 'sign'
+  ? { text: record.text, conversation: record.target, box: record.target_box, title: record.target_title ?? '' }
+  : null)
+
 const asRequest = (record) => ({
   op: record.op ?? 'get',
   names: record.vars,
@@ -43,6 +49,7 @@ const asRequest = (record) => ({
   title: record.title ?? '',
   host: record.host,
   sealedValue: record.value,
+  message: messageOf(record),
 })
 
 export const serviceTransport = (params, now = () => Date.now() / 1000) => {
@@ -68,7 +75,8 @@ export const serviceTransport = (params, now = () => Date.now() / 1000) => {
     if (verdict === 'forged') {
       return over(`Signature check failed: not signed by the key pinned for the ${label(record.host)}. Not approving.`, pinning)
     }
-    const problem = freshnessProblem(record, label(record.host), now())
+    const problem = freshnessProblem(record, label(record.host), now()) ??
+      (record.op === 'sign' ? messageProblem(messageOf(record)) : null)
     if (problem) return over(problem, pinning)
     current = record
     const age = Math.max(0, Math.round(now() - record.ts))

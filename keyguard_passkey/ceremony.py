@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Final
 
 from . import pages
+from .service.message import OwnerMessage
 from .store import StaleStore, Store, StoreError
 
 RP_HOST: Final = "localhost"
@@ -39,6 +40,7 @@ class Op(Enum):
     LIST = "list"
     SET = "set"
     RM = "rm"
+    SIGN = "sign"
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ class Request:
     force: bool = False
     session: str = ""
     title: str = ""
+    message: OwnerMessage | None = None
 
     def as_json(self) -> dict[str, object]:
         return {"op": self.op.value, "names": list(self.names), "values": self.values, "force": self.force,

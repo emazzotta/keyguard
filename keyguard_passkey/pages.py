@@ -24,6 +24,7 @@ ROUTES: Final = {
     "/transport-local.js": ("transport-local.js", JAVASCRIPT),
     "/transport-service.js": ("transport-service.js", JAVASCRIPT),
     "/unlock-core.js": ("unlock-core.js", JAVASCRIPT),
+    "/owner-message.js": ("owner-message.js", JAVASCRIPT),
     "/typage.js": ("typage.js", JAVASCRIPT),
     "/unlock.css": ("unlock.css", CSS),
 }

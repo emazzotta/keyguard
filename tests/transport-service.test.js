@@ -10,6 +10,7 @@ describe('serviceAnswer', () => {
     ['a listing', { names: ['A', 'B'] }, { list: ['A', 'B'] }],
     ['a write by the name it wrote', { written: ['A'], skipped: [], verified: 'A' }, { set: 'A' }],
     ['a removal', { removed: 'A' }, { rm: 'A' }],
+    ['a signed message by its token', { token: 'cGF5bG9hZA.c2ln' }, { sign: 'cGF5bG9hZA.c2ln' }],
   ])('should answer %s in the shape the client reads', (_case, outcome, expected) => {
     expect(serviceAnswer(outcome)).toEqual(expected)
   })

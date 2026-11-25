@@ -1,3 +1,4 @@
+import { addressee, signOwnerMessage } from './owner-message.js'
 import * as core from './unlock-core.js'
 import {
   $, answerAndClose, authenticatorProblem, capitalized, chip, describe, isCancelled, onSubmit,
@@ -31,6 +32,13 @@ const COPY = {
     lead: (origin) => `${origin} asks to remove this secret from the store. Approving deletes it with your passkey.`,
     label: 'Secret',
     button: 'Remove with passkey',
+  },
+  sign: {
+    title: 'Sign a message as you',
+    lead: (origin) => `${origin} asks you to sign this message for one session. That session takes it as your own ` +
+      'words, so read all of it.',
+    label: 'Message',
+    button: 'Sign with passkey',
   },
 }
 const ANSWERED_PANELS = ['review', 'trust', 'editkey']
@@ -90,7 +98,14 @@ const removeValue = async (request, remote) => {
   return { removed: name }
 }
 
-const FLOWS = { get: release, list: listNames, set: storeValues, rm: removeValue }
+const signMessage = async (request, remote) => {
+  if (!request.message) throw new Error('this request names no message to sign')
+  const index = await openIndex(remote)
+  const pem = await core.readOwnerKey(index, remote, store.fetchFile)
+  return { token: await signOwnerMessage(pem, request.message, Math.floor(Date.now() / 1000)) }
+}
+
+const FLOWS = { get: release, list: listNames, set: storeValues, rm: removeValue, sign: signMessage }
 
 const writeSummary = ({ written, skipped }) => [
   written.length ? `Wrote ${written.join(', ')}.` : '',
@@ -102,6 +117,7 @@ const DONE = {
   list: () => 'Sent the secret names, without values.',
   set: writeSummary,
   rm: ({ removed }) => `Removed ${removed}.`,
+  sign: () => `Signed. ${capitalized(transport.asker())} has the signed message.`,
 }
 
 const finish = (outcome, text, kind) => {
@@ -155,7 +171,16 @@ const showCopy = (request) => {
   $('names-label').textContent = copy.label
 }
 
+const showMessage = (message) => {
+  $('message').textContent = message?.text ?? ''
+  $('target').textContent = message ? addressee(message) : ''
+  $('message-row').hidden = !message
+  $('target-row').hidden = !message
+  $('names-row').hidden = Boolean(message)
+}
+
 const showFacts = (request, note) => {
+  showMessage(request.op === 'sign' ? request.message : null)
   $('names').replaceChildren(...(request.op === 'list' ? [LISTING_SCOPE] : request.names).map(chip))
   $('host').textContent = request.host ?? ''
   $('host-row').hidden = !request.host

@@ -18,6 +18,7 @@ from ..ceremony import Op, Request
 from . import client, pending
 from .client import Caller, Signer, UnlockError
 from .hint import NotifyHint, clean_container
+from .message import OwnerMessage
 from .presence import Presence, read_presence
 
 APPROVE_PATH: Final = "/approve"
@@ -89,6 +90,8 @@ class ServiceAsk:
             return self._reveal(list(request.names), asking)
         if request.op is Op.LIST:
             return self._list(asking)
+        if request.op is Op.SIGN:
+            return self._sign(request.message, asking)
         if len(request.names) != 1:
             raise UsageError("the service changes one name per approval")
         if request.op is Op.SET:
@@ -143,12 +146,28 @@ class ServiceAsk:
             return {"absent": absent.names}
         return {}
 
-    def _answer(self, request: client.UnlockRequest, names: list[str], op: Op, asking: Caller) -> str:
+    def _sign(self, message: OwnerMessage | None, asking: Caller) -> Mapping[str, object]:
+        if message is None:
+            raise UsageError("a sign request names the message and its target")
+        shown = OwnerMessage(message.text, message.target, message.box, client.clean_title(message.title))
+        problem = shown.problem()
+        if problem:
+            raise UsageError(problem)
+        ephemeral = client.generate_ephemeral()
+        response = self._answer(client.sign_request_for(self._signer, shown, ephemeral.recipient, asking), [], Op.SIGN,
+                                asking, shown.fields())
+        try:
+            return {"token": client.decrypt_token(response, ephemeral.identity, shown)}
+        except client.NotInStore as absent:
+            return {"absent": absent.names}
+
+    def _answer(self, request: client.UnlockRequest, names: list[str], op: Op, asking: Caller,
+                shown: Mapping[str, str] | None = None) -> str:
         with sigterm_cancels() as terminated:
             request_id = client.submit(self.url, self.headers, request, self._hint())
             record = pending.Request(id=request_id, vars=tuple(names), op=op.value, host=self.requester,
                                      link=self.approve_link(request_id), session=asking.session or None,
-                                     title=asking.title or None, pane=self.pane)
+                                     title=asking.title or None, pane=self.pane, **(shown or {}))
             return self._wait(record, terminated)
 
     def _wait(self, record: pending.Request, terminated: Callable[[], bool]) -> str:

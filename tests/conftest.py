@@ -26,7 +26,8 @@ REQUEST_TOKEN = "requester-test-token"
 PHONE_LOGIN = {DEFAULT_IDENTITY_HEADER: "owner@example.com"}
 REQUESTER = "devbox"
 LINK = re.compile(r"Approve on your phone: \S+/approve\?id=([A-Za-z0-9_-]+)")
-SIGNED_FIELDS = ("vars", "host", "eph_pubkey", "ts", "op", "value", "session", "title")
+SIGNED_FIELDS = ("vars", "host", "eph_pubkey", "ts", "op", "value", "session", "title", "text", "target",
+                 "target_box", "target_title")
 
 Decide = Callable[[dict[str, object]], object]
 
@@ -52,6 +53,18 @@ def verified(payload: bytes, signature_b64: str, public_key: Path) -> bool:
         result = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public_key), "-rawin",
                                  "-in", str(message), "-sigfile", str(signature)], capture_output=True, check=False)
         return result.returncode == 0
+
+
+def owner_token(text: str, conversation: str, box: str) -> str:
+    """A token of the page's shape for one message, with a signature of zeros: the requester checks only its payload."""
+    payload = {"v": 1, "text": text, "to": {"conversation": conversation, "box": box}, "nonce": "bm9uY2U",
+               "iat": 1, "exp": 601}
+    encode = lambda data: base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+    return f"{encode(json.dumps(payload).encode())}.{encode(bytes(64))}"
+
+
+def signs_the_shown_message(record: dict[str, object]) -> dict[str, str]:
+    return {"sign": owner_token(str(record["text"]), str(record["target"]), str(record["target_box"]))}
 
 
 def sealed_to(recipient: str, payload: object) -> str:

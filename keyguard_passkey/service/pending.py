@@ -29,7 +29,8 @@ WATCH_INTERVAL_SECONDS: Final = 1.0
 HEARTBEAT_SECONDS: Final = 30.0
 REQUEST_ID: Final = re.compile(r"[A-Za-z0-9_-]{1,64}")
 CANCEL_SUFFIX: Final = ".cancel"
-PUBLIC_FIELDS: Final = ("id", "vars", "op", "state", "host", "link", "session", "title", "pane", "created")
+PUBLIC_FIELDS: Final = ("id", "vars", "op", "state", "host", "link", "session", "title", "pane", "created", "text",
+                        "target", "target_box", "target_title")
 
 Record = dict[str, object]
 
@@ -52,6 +53,10 @@ class Request:
     session: str | None = None
     title: str | None = None
     pane: str | None = None
+    text: str | None = None
+    target: str | None = None
+    target_box: str | None = None
+    target_title: str | None = None
 
     def __post_init__(self) -> None:
         if not REQUEST_ID.fullmatch(self.id):
