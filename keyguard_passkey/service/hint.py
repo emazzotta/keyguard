@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .notify import SAFE_HOST
-from .presence import Presence
+from .presence import Presence, presence_of
 
 HINT_FIELD = "notify"
 
@@ -33,11 +33,4 @@ class NotifyHint:
 def parse_hint(raw: object) -> NotifyHint | None:
     if not isinstance(raw, dict):
         return None
-    return NotifyHint(presence=_presence(raw.get("presence")), container=clean_container(raw.get("container")))
-
-
-def _presence(value: object) -> Presence:
-    try:
-        return Presence(value)
-    except ValueError:
-        return Presence.UNKNOWN
+    return NotifyHint(presence=presence_of(raw.get("presence")), container=clean_container(raw.get("container")))

@@ -93,6 +93,7 @@ Another proxy needs the same behaviour, and `KEYGUARD_PASSKEY_IDENTITY_HEADER` s
 | `KEYGUARD_PASSKEY_TELEGRAM_BOT_TOKEN`, `KEYGUARD_PASSKEY_TELEGRAM_CHAT_ID` | Relay the notices posted to `/notify` to a Telegram chat | off |
 | `KEYGUARD_PASSKEY_TERMINAL_URL` | The origin of the web terminal, `https://host` with an optional port and no path: an `answer` ping ends with a link to `<origin>/chat/<session>` | off: no link |
 | `KEYGUARD_PASSKEY_PUBLIC_URL` | The origin where your phone reaches the service, `https://host` with an optional port and no path: a wait notice ends with a link to `<origin>/approve?id=<id>` | off: no link |
+| `KEYGUARD_PASSKEY_SPOKEN_ANSWER_URL`, `UNLOCK_TELEGRAM_BOT_SPOKEN_ANSWER_TOKEN` | Hand each answer to mazzotta-bot at this `http(s)://host[:port][/path]` URL, with the token that both services share under this one name ([Spoken Answers](#spoken-answers)) | off |
 | `KEYGUARD_PASSKEY_TOKEN_LABEL`, `KEYGUARD_PASSKEY_IDENTITY_LABEL` | How a notice names a caller with the token or with the header | `token client`, `signed-in device` |
 
 `serve` prints the settings it runs with, without the secrets.
@@ -145,6 +146,8 @@ A request expires after 5 minutes. The service keeps open requests in memory onl
 | `title` | Optional: the session's title, at most 4000 characters |
 | `text` | 1 to 4000 characters, for `answer` 1 to 100000 |
 | `kind` | Optional: `prompt` when the session waits for an answer or an approval, `finished` for a finished reply (the default), `answer` for the whole text of a reply (see Answers), `keyguard_failed` for a keyguard request that got no answer (see Keyguard Notices) |
+| `presence` | Optional, `answer` only: `computer`, `phone`, `away` or `unknown`, where the owner was when the answer went out. Any other value is `unknown` |
+| `seen` | Optional, `answer` only: the newest use of a web terminal, in epoch seconds, fresh or not. Anything but a whole number from 0 to 999999999999 is no value |
 
 The service answers `202` and sends in the background, `400` for any other body, and `429` past 20 pings a minute. It writes the message itself in Telegram HTML and escapes each value, so a caller cannot add a line or a tag:
 
@@ -173,6 +176,8 @@ Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc
 - When `KEYGUARD_PASSKEY_TERMINAL_URL` is set, the last message has the link `Open the session in Safari` to `<origin>/chat/<session>`, above the footer. The service builds the link from that setting and the session. A `link` field in the body is ignored. Telegram's own browser cannot use a passkey, hence Safari.
 - The messages go one after the other from one background thread. A message that Telegram refuses is logged as `telegram: message 2 of 3 not sent (HTTP 429)`, without its text, and the next one is still sent.
 
+A wrong `presence` or `seen` never costs the answer. The service uses neither: it passes both on to [Spoken Answers](#spoken-answers).
+
 A reply of more than three messages ends like this:
 
 ```
@@ -187,6 +192,30 @@ Open the session in Safari
 Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
 [session 4a015f0f]
 ```
+
+### Spoken Answers
+
+With `KEYGUARD_PASSKEY_SPOKEN_ANSWER_URL` and `UNLOCK_TELEGRAM_BOT_SPOKEN_ANSWER_TOKEN` set, the service hands each answer to mazzotta-bot, which decides whether to speak it (its UC-014). Without both, it hands over nothing and `serve` says `spoken answers off`.
+
+```mermaid
+sequenceDiagram
+    participant Hook as claude-notify
+    participant Service as unlock service
+    participant Telegram
+    participant Bot as mazzotta-bot
+    Hook->>Service: POST /notify (answer, presence, seen)
+    Service-->>Hook: 202
+    Service->>Telegram: sendMessage, 1 to 3 times
+    Telegram-->>Service: message_id
+    Service->>Bot: POST spoken answer (Bearer token)
+    Bot-->>Service: 202 queued, 204 nothing to say
+    Bot->>Telegram: sendVoice, a reply to the first message
+```
+
+- It hands over an answer only after its messages went out, in the same background thread, so the voice never delays the text.
+- It hands over nothing when Telegram took none of the messages: the voice needs a message to reply to.
+- The body is `{"session", "text", "presence", "seen", "reply_to"}`: the session's UUID, the text as the messages carry it (redacted and cut like them), the presence (`unknown` when the notice named none), `seen` or `null`, and the id of the first message that Telegram took.
+- It waits 10 seconds for the bot. Any failure is one line, such as `spoken answer: not sent (HTTP 401)`, without the text or the token. It never retries.
 
 ## Keyguard Notices
 

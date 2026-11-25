@@ -24,6 +24,14 @@ class Presence(Enum):
     UNKNOWN = "unknown"
 
 
+def presence_of(value: object) -> Presence:
+    """A presence that a caller claims: anything but one of the four values reads as `unknown`."""
+    try:
+        return Presence(value)
+    except ValueError:
+        return Presence.UNKNOWN
+
+
 def classify(lines: Iterable[str], now: float) -> Presence:
     """The kind of the fresh lines: `computer` before `phone`, else `away`. A line that does not parse is ignored."""
     fresh = set()

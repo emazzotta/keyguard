@@ -3,7 +3,7 @@
 A ping is headed `Claude on <origin>`, the label of how the caller authenticated: the request token or the identity
 header. A keyguard notice has no heading and opens with its mark. A message with a session ends with the marker that
 the Telegram bot reads from a quoted message. An `answer` carries a whole reply, in up to three messages, with a link to
-the session in the web terminal when one is set.
+the session in the web terminal when one is set, and goes on to the spoken answer relay once Telegram took a message.
 """
 from __future__ import annotations
 
@@ -18,10 +18,11 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Final, Protocol, Union
+from typing import Final, Protocol, TypeGuard, Union
 from uuid import UUID
 
 from .longtext import MESSAGE_LIMIT, multiline, split_parts
+from .presence import Presence, presence_of
 from .scrub import scrub
 
 API_BASE: Final = "https://api.telegram.org"
@@ -44,6 +45,7 @@ UUID_LENGTH: Final = 36
 SESSION_MARKER: Final = "[session {short}]"
 PARSE_MODE: Final = "HTML"
 CHAT_PATH: Final = "/chat/"
+SEEN_LIMIT: Final = 10 ** 12
 
 
 class NoticeKind(Enum):
@@ -65,9 +67,23 @@ Send = Callable[[urllib.request.Request], object]
 Spawn = Callable[..., None]
 
 
-def _post(request: urllib.request.Request) -> None:
+def _post(request: urllib.request.Request) -> int | None:
     with urllib.request.urlopen(request, timeout=SEND_TIMEOUT_SECONDS) as response:
-        response.read()
+        return message_id_of(response.read())
+
+
+def message_id_of(body: bytes) -> int | None:
+    """The id of the message that Telegram's sendMessage answer names, or None."""
+    try:
+        result = json.loads(body).get("result")
+        message_id = result.get("message_id")
+    except (ValueError, AttributeError):
+        return None
+    return message_id if is_whole_number(message_id) else None
+
+
+def is_whole_number(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _in_background(function: Callable[..., None], *args: object) -> None:
@@ -85,6 +101,8 @@ class ClaudeNotice:
     title: str | None = None
     link: str | None = None
     cut: bool = False
+    presence: Presence = Presence.UNKNOWN
+    seen: int | None = None
 
 
 class NoticeError(ValueError):
@@ -100,8 +118,16 @@ def parse_notice(payload: object, origin: str) -> ClaudeNotice:
     kind = parse_kind(payload.get("kind", NoticeKind.FINISHED.value))
     session = parse_session(payload.get("session"), kind)
     raw = payload.get("text")
-    text, cut = parse_answer(raw) if kind is NoticeKind.ANSWER else (parse_text(raw), False)
-    return ClaudeNotice(session, container, text, origin, kind, parse_title(payload.get("title")), cut=cut)
+    if kind is not NoticeKind.ANSWER:
+        return ClaudeNotice(session, container, parse_text(raw), origin, kind, parse_title(payload.get("title")))
+    text, cut = parse_answer(raw)
+    return ClaudeNotice(session, container, text, origin, kind, parse_title(payload.get("title")), cut=cut,
+                        presence=presence_of(payload.get("presence")), seen=parse_seen(payload.get("seen")))
+
+
+def parse_seen(seen: object) -> int | None:
+    """The last use at a web terminal, in epoch seconds. A wrong value never costs the answer."""
+    return seen if is_whole_number(seen) and 0 <= seen < SEEN_LIMIT else None
 
 
 def parse_session(session: object, kind: NoticeKind) -> str | None:
@@ -229,7 +255,7 @@ def _footer(notice: ClaudeNotice) -> str:
     return "\n".join(part for part in (line, marker) if part)
 
 
-def _describe(error: Exception) -> str:
+def describe_failure(error: Exception) -> str:
     if isinstance(error, urllib.error.HTTPError):
         return f"HTTP {error.code}"
     return type(error).__name__
@@ -239,29 +265,40 @@ class Notifier(Protocol):
     def claude_notice(self, notice: ClaudeNotice) -> None: ...
 
 
+class Relay(Protocol):
+    def relay(self, notice: ClaudeNotice, reply_to: int) -> None: ...
+
+
 class TelegramNotifier:
-    def __init__(self, token: str, chat_id: str, send: Send = _post, spawn: Spawn = _in_background) -> None:
+    def __init__(self, token: str, chat_id: str, send: Send = _post, spawn: Spawn = _in_background,
+                 spoken: Relay | None = None) -> None:
         self._token = token
         self._chat_id = chat_id
         self._send = send
         self._spawn = spawn
+        self._spoken = spoken
 
     def claude_notice(self, notice: ClaudeNotice) -> None:
-        self._spawn(self._deliver_all, notice_messages(notice))
+        self._spawn(self._deliver_all, notice, notice_messages(notice))
 
-    def _deliver_all(self, messages: list[str]) -> None:
-        for number, text in enumerate(messages, start=1):
-            self._deliver(text, f" {number} of {len(messages)}" if len(messages) > 1 else "")
+    def _deliver_all(self, notice: ClaudeNotice, messages: list[str]) -> None:
+        sent = [self._deliver(text, f" {number} of {len(messages)}" if len(messages) > 1 else "")
+                for number, text in enumerate(messages, start=1)]
+        first = next((message_id for message_id in sent if message_id is not None), None)
+        if self._spoken and notice.kind is NoticeKind.ANSWER and first is not None:
+            self._spoken.relay(notice, first)
 
-    def _deliver(self, text: str, position: str) -> None:
+    def _deliver(self, text: str, position: str) -> int | None:
         body = json.dumps({"chat_id": self._chat_id, "text": text, "parse_mode": PARSE_MODE,
                            "link_preview_options": {"is_disabled": True}}).encode()
         request = urllib.request.Request(f"{API_BASE}/bot{self._token}/sendMessage", data=body,
                                          headers={"Content-Type": "application/json"})
         try:
-            self._send(request)
+            message_id = self._send(request)
         except (OSError, ValueError) as error:
-            print(f"telegram: message{position} not sent ({_describe(error)})", file=sys.stderr, flush=True)
+            print(f"telegram: message{position} not sent ({describe_failure(error)})", file=sys.stderr, flush=True)
+            return None
+        return message_id if is_whole_number(message_id) else None
 
 
 class DisabledNotifier:
@@ -272,5 +309,5 @@ class DisabledNotifier:
 AnyNotifier = Union[TelegramNotifier, DisabledNotifier]
 
 
-def telegram_notifier(token: str, chat_id: str) -> AnyNotifier:
-    return TelegramNotifier(token, chat_id) if token and chat_id else DisabledNotifier()
+def telegram_notifier(token: str, chat_id: str, spoken: Relay | None = None) -> AnyNotifier:
+    return TelegramNotifier(token, chat_id, spoken=spoken) if token and chat_id else DisabledNotifier()

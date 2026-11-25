@@ -6,12 +6,14 @@ import pytest
 
 from keyguard_passkey.service.settings import (
     DEFAULT_IDENTITY_HEADER,
+    SPOKEN_ANSWER_TOKEN_VARIABLE,
     Requester,
     Settings,
     SettingsError,
     parse_logins,
     parse_origin,
     parse_requesters,
+    parse_service_url,
     settings_from_env,
 )
 
@@ -43,6 +45,8 @@ def test_should_read_every_setting_from_its_variable():
         "KEYGUARD_PASSKEY_HEARTBEAT_URL": "https://monitor.example/push",
         "KEYGUARD_PASSKEY_TERMINAL_URL": "https://terminal.example.ts.net:8443/",
         "KEYGUARD_PASSKEY_PUBLIC_URL": "https://unlock.example.ts.net/",
+        "KEYGUARD_PASSKEY_SPOKEN_ANSWER_URL": "http://telegram-bot.telegram-bot:8080/spoken-answer",
+        SPOKEN_ANSWER_TOKEN_VARIABLE: " spoken ",
     }
 
     assert settings_from_env(env, STORE) == Settings(
@@ -50,7 +54,34 @@ def test_should_read_every_setting_from_its_variable():
         allowed_logins=frozenset({"me@example.com"}), request_token="token", request_rate_limit=5,
         requesters=(Requester("devbox", "dev box"), Requester("mac", "Mac")), token_label="dev box",
         identity_label="Mac", telegram_token="bot", telegram_chat="42", heartbeat_url="https://monitor.example/push",
-        terminal_url="https://terminal.example.ts.net:8443", public_url="https://unlock.example.ts.net")
+        terminal_url="https://terminal.example.ts.net:8443", public_url="https://unlock.example.ts.net",
+        spoken_answer_url="http://telegram-bot.telegram-bot:8080/spoken-answer", spoken_answer_token="spoken")
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_read_the_spoken_answer_token_under_the_name_the_bot_shares():
+    assert SPOKEN_ANSWER_TOKEN_VARIABLE == "UNLOCK_TELEGRAM_BOT_SPOKEN_ANSWER_TOKEN"
+    assert settings_from_env({"KEYGUARD_PASSKEY_" + SPOKEN_ANSWER_TOKEN_VARIABLE: "x"}, STORE).spoken_answer_token == ""
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("text", [
+    "", "http://telegram-bot:8080/spoken-answer", "https://bot.example/spoken-answer", "http://10.0.0.7:8080/",
+    "http://bot.example",
+])
+def test_should_read_a_service_url_or_none(text):
+    assert parse_service_url(text, "SPOKEN_ANSWER_URL") == text
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("text", [
+    "telegram-bot:8080/spoken-answer", "ftp://bot.example/x", "http://", "http://bot.example/x?y=1",
+    "http://user@bot.example/x", "http://bot example/x", 'http://bot.example/x"', "http://bot.example:port/x",
+    "http://bot.example/x#y", "http://" + "a" * 254,
+])
+def test_should_refuse_a_service_url_with_more_than_scheme_host_port_and_path(text):
+    with pytest.raises(SettingsError, match="KEYGUARD_PASSKEY_SPOKEN_ANSWER_URL"):
+        settings_from_env({"KEYGUARD_PASSKEY_SPOKEN_ANSWER_URL": text}, STORE)
 
 
 @pytest.mark.spec("docs/service.md")

@@ -19,6 +19,8 @@ HEADER_NAME: Final = re.compile(r"[A-Za-z0-9-]{1,64}")
 LIST_SEPARATOR: Final = ","
 PAIR_SEPARATOR: Final = "="
 ORIGIN_SAFE: Final = re.compile(r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?")
+SERVICE_URL_SAFE: Final = re.compile(r"https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9._~-]*)*")
+SPOKEN_ANSWER_TOKEN_VARIABLE: Final = "UNLOCK_TELEGRAM_BOT_SPOKEN_ANSWER_TOKEN"
 
 
 class SettingsError(ValueError):
@@ -49,6 +51,8 @@ class Settings:
     heartbeat_url: str = ""
     terminal_url: str = ""
     public_url: str = ""
+    spoken_answer_url: str = ""
+    spoken_answer_token: str = ""
 
     def public_config(self) -> dict[str, object]:
         return {"requesters": {requester.id: {"label": requester.label} for requester in self.requesters}}
@@ -96,6 +100,13 @@ def parse_origin(text: str, name: str) -> str:
     return origin
 
 
+def parse_service_url(text: str, name: str) -> str:
+    """An `http(s)://host[:port][/path]` URL in the cluster or the tailnet, or nothing."""
+    if text and not SERVICE_URL_SAFE.fullmatch(text):
+        raise SettingsError(f"{PREFIX}{name} is not an http or https URL with only a host, a port and a path: {text!r}")
+    return text
+
+
 def settings_from_env(env: Mapping[str, str], store: Path) -> Settings:
     header = _setting(env, "IDENTITY_HEADER", DEFAULT_IDENTITY_HEADER)
     if not HEADER_NAME.fullmatch(header):
@@ -116,4 +127,6 @@ def settings_from_env(env: Mapping[str, str], store: Path) -> Settings:
         heartbeat_url=_setting(env, "HEARTBEAT_URL"),
         terminal_url=parse_origin(_setting(env, "TERMINAL_URL"), "TERMINAL_URL"),
         public_url=parse_origin(_setting(env, "PUBLIC_URL"), "PUBLIC_URL"),
+        spoken_answer_url=parse_service_url(_setting(env, "SPOKEN_ANSWER_URL"), "SPOKEN_ANSWER_URL"),
+        spoken_answer_token=env.get(SPOKEN_ANSWER_TOKEN_VARIABLE, "").strip(),
     )

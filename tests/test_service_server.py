@@ -815,15 +815,29 @@ def test_should_limit_notices_apart_from_requests(tmp_path):
 @pytest.mark.spec("docs/service.md")
 def test_should_describe_its_settings_without_their_secrets(tmp_path):
     settings = Settings(store=tmp_path, port=0, request_token=REQUEST_TOKEN, telegram_token="bot-secret",
-                        telegram_chat="1", heartbeat_url="https://monitor.example/push/secret")
+                        telegram_chat="1", heartbeat_url="https://monitor.example/push/secret",
+                        spoken_answer_url="http://bot.example/spoken-answer", spoken_answer_token="spoken-secret")
     served = service.build_server(settings, notifier=RecordingNotifier())
     try:
         line = service.describe(settings, served)
     finally:
         served.server_close()
 
-    assert "request token on, telegram on, heartbeat on" in line
-    assert not any(secret in line for secret in (REQUEST_TOKEN, "bot-secret", "push/secret"))
+    assert "request token on, telegram on, heartbeat on, spoken answers on" in line
+    assert not any(secret in line for secret in (REQUEST_TOKEN, "bot-secret", "push/secret", "spoken-secret"))
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("url", "token"), [("", ""), ("http://bot.example/spoken-answer", ""), ("", "spoken")])
+def test_should_describe_spoken_answers_as_off_without_both_url_and_token(tmp_path, url, token):
+    settings = Settings(store=tmp_path, port=0, spoken_answer_url=url, spoken_answer_token=token)
+    served = service.build_server(settings, notifier=RecordingNotifier())
+    try:
+        line = service.describe(settings, served)
+    finally:
+        served.server_close()
+
+    assert line.endswith("spoken answers off")
 
 
 class CountingQueue:

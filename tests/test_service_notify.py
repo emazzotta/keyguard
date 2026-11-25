@@ -25,12 +25,14 @@ from keyguard_passkey.service.notify import (
     NoticeKind,
     TelegramNotifier,
     answer_room,
+    message_id_of,
     notice_message,
     notice_messages,
     parse_notice,
     telegram_notifier,
     with_session_link,
 )
+from keyguard_passkey.service.presence import Presence
 from keyguard_passkey.service.scrub import REDACTED
 
 TOKEN = "123456:bot-secret"
@@ -602,3 +604,116 @@ def test_should_post_the_failure_line_of_a_caller_to_the_chat():
     notifier(sent.append).claude_notice(parse_notice(failure(session=SHORT), ORIGIN))
 
     assert json.loads(sent[0].data)["text"] == f"{FAILED_MARK} Request expired with no answer.\n\n[session 4a015f0f]"
+
+
+class RecordingRelay:
+    def __init__(self) -> None:
+        self.relayed: list[tuple[ClaudeNotice, int]] = []
+
+    def relay(self, notice: ClaudeNotice, reply_to: int) -> None:
+        self.relayed.append((notice, reply_to))
+
+
+def numbered_send(sent: list[str], first_id: int = 501):
+    def send(request: urllib.request.Request) -> int:
+        sent.append(json.loads(request.data)["text"])
+        return first_id + len(sent) - 1
+    return send
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_presence_and_the_last_use_of_an_answer():
+    parsed = parse_notice(answer(presence="away", seen=1_764_061_200), ORIGIN)
+
+    assert (parsed.presence, parsed.seen) == (Presence.AWAY, 1_764_061_200)
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("presence", "seen"), [
+    (None, None), ("asleep", "yesterday"), (7, 1.5), (["away"], True), ("AWAY", -1), ("x" * 4000, 10 ** 13),
+])
+def test_should_read_an_odd_presence_as_unknown_and_an_odd_last_use_as_none_and_still_take_the_answer(
+        presence, seen):
+    parsed = parse_notice(answer(presence=presence, seen=seen), ORIGIN)
+
+    assert (parsed.presence, parsed.seen) == (Presence.UNKNOWN, None)
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("kind", ["finished", "prompt"])
+def test_should_drop_the_presence_and_the_last_use_of_a_ping(kind):
+    parsed = parse_notice(notice(kind=kind, presence="away", seen=1_764_061_200), ORIGIN)
+
+    assert (parsed.presence, parsed.seen) == (Presence.UNKNOWN, None)
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_hand_an_answer_to_the_relay_with_its_first_message_after_all_its_messages():
+    sent: list[str] = []
+    relay = RecordingRelay()
+    target = TelegramNotifier(TOKEN, CHAT, send=numbered_send(sent), spawn=run_inline, spoken=relay)
+
+    target.claude_notice(parse_notice(answer(text=paragraphs(4), presence="phone"), ORIGIN))
+
+    assert len(sent) == 2
+    assert [(relayed.session, relayed.presence, reply_to) for relayed, reply_to in relay.relayed] == [
+        (SESSION, Presence.PHONE, 501)]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_reply_to_the_first_message_that_telegram_took():
+    sent: list[str] = []
+    relay = RecordingRelay()
+
+    def fail_the_first(request: urllib.request.Request) -> int:
+        text = json.loads(request.data)["text"]
+        if "(1/2)" in text:
+            raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", {}, None)
+        sent.append(text)
+        return 777
+
+    with redirect_stderr(io.StringIO()):
+        TelegramNotifier(TOKEN, CHAT, send=fail_the_first, spawn=run_inline, spoken=relay).claude_notice(
+            parse_notice(answer(text=paragraphs(4)), ORIGIN))
+
+    assert [reply_to for _, reply_to in relay.relayed] == [777]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_relay_nothing_when_telegram_took_no_message_of_the_answer():
+    relay = RecordingRelay()
+
+    def refuse(request: urllib.request.Request) -> int:
+        raise urllib.error.URLError("down")
+
+    with redirect_stderr(io.StringIO()):
+        TelegramNotifier(TOKEN, CHAT, send=refuse, spawn=run_inline, spoken=relay).claude_notice(
+            parse_notice(answer(), ORIGIN))
+
+    assert relay.relayed == []
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("kind", ["finished", "prompt"])
+def test_should_relay_only_answers(kind):
+    relay = RecordingRelay()
+
+    TelegramNotifier(TOKEN, CHAT, send=numbered_send([]), spawn=run_inline, spoken=relay).claude_notice(
+        parse_notice(notice(kind=kind), ORIGIN))
+
+    assert relay.relayed == []
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("body", "message_id"), [
+    (b'{"ok": true, "result": {"message_id": 42, "chat": {"id": 1}}}', 42),
+    (b'{"ok": true, "result": {"message_id": "42"}}', None),
+    (b'{"ok": true, "result": {"message_id": true}}', None),
+    (b'{"ok": true, "result": []}', None),
+    (b'{"ok": true}', None),
+    (b"[]", None),
+    (b"not json", None),
+    (b"\xff", None),
+])
+def test_should_read_the_message_id_from_the_answer_of_telegram_or_none(body, message_id):
+    assert message_id_of(body) == message_id

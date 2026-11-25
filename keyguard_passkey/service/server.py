@@ -35,6 +35,7 @@ from .requests import (
 )
 from .settings import Settings
 from .shutdown import Background, DrainingServer, shut_down, stop_on_sigterm
+from .spoken import spoken_answer_relay
 
 JSON_TYPE: Final = "application/json"
 SAME_ORIGIN_FETCH: Final = frozenset({"same-origin", "none"})
@@ -302,7 +303,7 @@ def build_server(settings: Settings, notifier: Notifier | None = None,
                  page_source: pages.PageSource = pages.page,
                  queue: RequestQueue | None = None) -> DrainingServer:
     settings.store.mkdir(parents=True, exist_ok=True)
-    chosen = notifier or telegram_notifier(settings.telegram_token, settings.telegram_chat)
+    chosen = notifier or notifier_for(settings)
     handler = type("BoundHandler", (Handler,), {
         "settings": settings,
         "store": Store(settings.store),
@@ -327,11 +328,17 @@ def describe(settings: Settings, server: ThreadingHTTPServer) -> str:
             f"{len(settings.requesters)} requester(s), {identities}, "
             f"request token {'on' if settings.request_token else 'off'}, "
             f"telegram {'on' if settings.telegram_token and settings.telegram_chat else 'off'}, "
-            f"heartbeat {'on' if settings.heartbeat_url else 'off'}")
+            f"heartbeat {'on' if settings.heartbeat_url else 'off'}, "
+            f"spoken answers {'on' if settings.spoken_answer_url and settings.spoken_answer_token else 'off'}")
+
+
+def notifier_for(settings: Settings) -> Notifier:
+    spoken = spoken_answer_relay(settings.spoken_answer_url, settings.spoken_answer_token)
+    return telegram_notifier(settings.telegram_token, settings.telegram_chat, spoken)
 
 
 def serve(settings: Settings) -> None:
-    notifier = telegram_notifier(settings.telegram_token, settings.telegram_chat)
+    notifier = notifier_for(settings)
     queue = request_queue_for(settings, notifier)
     server = build_server(settings, notifier=notifier, queue=queue)
     print(describe(settings, server), flush=True)
