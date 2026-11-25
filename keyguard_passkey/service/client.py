@@ -14,7 +14,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Final
@@ -179,7 +179,8 @@ def sign_request_for(signer: Signer, message: OwnerMessage, recipient: str,
     problem = message.problem()
     if problem:
         raise UnlockError(problem)
-    return signer.request([], recipient, caller, op=SIGN_OP, **message.fields())
+    shown = replace(message, title=clean_title(message.title))
+    return signer.request([], recipient, caller, op=SIGN_OP, **shown.fields())
 
 
 def seal_to(recipient: str, plaintext: bytes) -> str:

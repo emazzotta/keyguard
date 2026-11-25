@@ -340,7 +340,7 @@ The service answers `400` to any other shape, a `value` included. The page refus
 
 ### The Client
 
-`keyguard-passkey sign --target <id> --box <box> [--title <title>]` reads the text on standard input, asks as above and prints the token. Its exit codes are those of `get`. `pending` lists a sign request with its `text`, `target`, `target_box` and `target_title`, and an empty `vars`. The keyguard notices name the operation `sign a message`.
+`keyguard-passkey sign --target <id> --box <box> [--title <title>]` reads the text on standard input, asks as above and prints the token. It turns hidden characters in the title into spaces and cuts it at 80 characters, so a long title never costs the approval. Its exit codes are those of `get`. `pending` lists a sign request with its `text`, `target`, `target_box` and `target_title`, and an empty `vars`. The keyguard notices name the operation `sign a message`.
 
 ## Limits
 

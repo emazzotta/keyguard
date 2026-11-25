@@ -323,6 +323,22 @@ def test_should_sign_a_message_request_that_names_no_variable(unlock_service, si
     assert verified(client.serialize(request.body), request.signature, unlock_service.public_key)
 
 
+@pytest.mark.parametrize("title,shown", [
+    ("x" * 81, "x" * 79 + "\u2026"),
+    ("Fix\nthe \u202eform", "Fix the form"),
+], ids=["over 80 characters", "hidden characters"])
+def test_should_shorten_and_clean_a_target_title_the_service_would_refuse(signer, title, shown):
+    body = client.sign_request_for(signer, OwnerMessage(text="ok", target=MESSAGE.target, box="devbox", title=title), "age1eph").body
+
+    assert body["target_title"] == shown
+
+
+def test_should_leave_out_a_target_title_with_nothing_to_show(signer):
+    body = client.sign_request_for(signer, OwnerMessage(text="ok", target=MESSAGE.target, box="devbox", title=" \u200b "), "age1eph").body
+
+    assert "target_title" not in body
+
+
 def test_should_serialize_a_sign_request_in_the_order_the_phone_verifies(signer):
     body = client.sign_request_for(signer, OwnerMessage(text="ok", target=MESSAGE.target, box="devbox"), "age1eph").body
 
