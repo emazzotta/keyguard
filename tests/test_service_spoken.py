@@ -51,7 +51,7 @@ def test_should_pass_on_an_unknown_presence_and_a_missing_last_use():
 
 @pytest.mark.spec("docs/service.md")
 @pytest.mark.parametrize(("failure", "detail"), [
-    (urllib.error.HTTPError(URL, 401, "Unauthorized", {}, None), "HTTP 401"),
+    (urllib.error.HTTPError(URL, 401, "Unauthorized", {}, io.BytesIO()), "HTTP 401"),
     (urllib.error.URLError("connection refused"), "URLError"),
     (TimeoutError("timed out"), "TimeoutError"),
 ])

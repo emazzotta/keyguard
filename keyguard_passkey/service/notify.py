@@ -18,12 +18,15 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Final, Protocol, TypeGuard, Union
+from typing import TYPE_CHECKING, Final, Protocol, Union
 from uuid import UUID
 
 from .longtext import MESSAGE_LIMIT, multiline, split_parts
 from .presence import Presence, presence_of
 from .scrub import scrub
+
+if TYPE_CHECKING:
+    from typing import TypeGuard
 
 API_BASE: Final = "https://api.telegram.org"
 SEND_TIMEOUT_SECONDS: Final = 10
