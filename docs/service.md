@@ -308,7 +308,7 @@ sequenceDiagram
 
 | Field | Value |
 |---|---|
-| `text` | The message: 1 to 1000 characters. Line breaks are allowed; other control characters and format, private-use, surrogate and separator characters are not |
+| `text` | The message: 1 to 1000 characters. Line breaks are allowed; other control characters, format, private-use and surrogate characters, line and paragraph separators, and every default-ignorable code point (which draws as nothing, such as a variation selector) are not |
 | `target` | The full conversation id of the session it is for: a Claude Code UUID, an opencode `ses_` id or `agy_` and an agy UUID |
 | `target_box` | That session's box as the web terminal names it: 1 to 63 letters, digits or hyphens |
 | `target_title` | Optional: its title, under the rules of `title` |
@@ -335,7 +335,7 @@ The service answers `400` to any other shape, a `value` included. The page refus
 
 ### The Owner Key
 
-- `KEYGUARD_OWNER_SIGNING_KEY` is a variable of the store that no read releases. The client and the service refuse a `get`, `set` or `rm` request that names it, and the page refuses it in each of those approvals (`exec` included), so a session can neither read nor replace it. `list` names it.
+- `KEYGUARD_OWNER_SIGNING_KEY` is a variable of the store that no read releases. With a service, the client and the service refuse a `get`, `set` or `rm` request that names it. In every mode the page refuses it in each of those approvals (`exec` included), so a session can neither read nor replace it. `list` names it.
 - The Mac's keyguard refuses it the same way and creates it (keyguard `README.md`, Owner Signatures).
 
 ### The Client

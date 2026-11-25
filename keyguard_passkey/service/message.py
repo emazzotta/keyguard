@@ -16,6 +16,12 @@ TOKEN_VERSION: Final = 1
 MAX_MESSAGE_CHARS: Final = 1000
 LINE_BREAK: Final = "\n"
 HIDDEN_MESSAGE_CATEGORIES: Final = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
+DEFAULT_IGNORABLE: Final = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
 UUID: Final = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 TARGET: Final = re.compile(rf"{UUID}|ses_[0-9A-Za-z]{{20,40}}|agy_{UUID}")
 BOX: Final = re.compile(r"[0-9A-Za-z-]{1,63}")
@@ -23,10 +29,15 @@ MESSAGE_FIELDS: Final = ("text", "target", "target_box", "target_title")
 OWNER_KEY_REFUSED: Final = f"{OWNER_KEY_NAME} is never released, written or removed: it only signs a message you approve"
 
 
+def is_hidden(char: str) -> bool:
+    point = ord(char)
+    return (unicodedata.category(char) in HIDDEN_MESSAGE_CATEGORIES
+            or any(first <= point <= last for first, last in DEFAULT_IGNORABLE))
+
+
 def is_message_text(text: object) -> bool:
     return (isinstance(text, str) and 0 < len(text) <= MAX_MESSAGE_CHARS
-            and not any(char != LINE_BREAK and unicodedata.category(char) in HIDDEN_MESSAGE_CATEGORIES
-                        for char in text))
+            and not any(char != LINE_BREAK and is_hidden(char) for char in text))
 
 
 def is_target(target: object) -> bool:
@@ -53,8 +64,7 @@ class OwnerMessage:
 
     def problem(self) -> str | None:
         if not is_message_text(self.text):
-            return (f"the message must be 1 to {MAX_MESSAGE_CHARS} characters, with line breaks but no other "
-                    "control, format or separator characters")
+            return f"the message must be 1 to {MAX_MESSAGE_CHARS} characters, with line breaks but no other hidden characters"
         if not is_target(self.target):
             return "the target must be a full conversation id: a Claude Code UUID, an opencode ses_ id or agy_<uuid>"
         if not is_box(self.box):
