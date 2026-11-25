@@ -73,6 +73,13 @@ public func parseArgs(_ args: [String]) -> ParsedArgs {
     return ParsedArgs(positional: positional, cacheDuration: cacheDuration, caller: caller)
 }
 
+public let ownerKeyName = "KEYGUARD_OWNER_SIGNING_KEY"
+public let ownerKeyRefusal = "\(ownerKeyName) is never released or renamed: it only signs a message you approve"
+
+public func releasableNames(_ names: [String]) -> [String] {
+    names.filter { $0 != ownerKeyName }
+}
+
 /// The Touch ID reason: what runs, who the caller says it acts for, how long the result is kept.
 public func buildReason(base: String, cacheDuration: Int?, caller: String? = nil) -> String {
     var reason = base

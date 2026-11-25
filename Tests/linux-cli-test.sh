@@ -342,6 +342,29 @@ WEIRD" "$("$keyguard" list)"
     assert_contains "should name a key it does not hold" "$("$keyguard" get NOPE 2>&1)" "Keys not found: NOPE"
 
     echo ""
+    echo "the owner key"
+    printf -- '-----BEGIN PRIVATE KEY-----\nowner\n-----END PRIVATE KEY-----' |
+        "$keyguard" set KEYGUARD_OWNER_SIGNING_KEY >/dev/null 2>&1
+    assert_contains "should list the owner key by name" "$("$keyguard" list)" "KEYGUARD_OWNER_SIGNING_KEY"
+    : > "$work/prompts.log"
+    output="$("$keyguard" get JIRA_TOKEN KEYGUARD_OWNER_SIGNING_KEY 2>&1)"
+    assert_equals "should refuse a read of the owner key before any Touch ID prompt" \
+        "0" "$(wc -l < "$work/prompts.log" | tr -d ' ')"
+    assert_contains "should say the owner key only signs" "$output" "only signs a message you approve"
+    assert_absent "should release no other value of a batch that names the owner key" "$output" "jira-value"
+    assert_equals "should exit 1 for a read of the owner key" \
+        "1" "$("$keyguard" get KEYGUARD_OWNER_SIGNING_KEY >/dev/null 2>&1; echo $?)"
+    output="$("$keyguard" export 2>/dev/null)"
+    assert_absent "should leave the owner key out of an export" "$output" "KEYGUARD_OWNER_SIGNING_KEY"
+    assert_contains "should export every other secret" "$output" "JIRA_TOKEN=jira-value"
+    assert_equals "should refuse to rename the owner key" \
+        "1" "$("$keyguard" mv KEYGUARD_OWNER_SIGNING_KEY OTHER >/dev/null 2>&1; echo $?)"
+    assert_equals "should refuse to rename a secret onto the owner key" \
+        "1" "$("$keyguard" mv JIRA_TOKEN KEYGUARD_OWNER_SIGNING_KEY --force >/dev/null 2>&1; echo $?)"
+    assert_equals "should keep a secret it refused to rename" "jira-value" "$("$keyguard" get JIRA_TOKEN)"
+    "$keyguard" delete KEYGUARD_OWNER_SIGNING_KEY >/dev/null 2>&1
+
+    echo ""
     echo "store service sync"
     remote_sync_tests "$keyguard"
 

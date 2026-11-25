@@ -7,6 +7,7 @@ func commandGet(_ arguments: [String]) {
     guard !keys.isEmpty else {
         fail("Usage: keyguard get <KEY> [KEY...] [--cache-duration N]")
     }
+    guard releasableNames(keys) == keys else { fail(ownerKeyRefusal) }
 
     let reason = buildReason(base: "Reveal \(keys.joined(separator: ", "))",
                              cacheDuration: parsed.cacheDuration, caller: parsed.caller)
@@ -46,6 +47,7 @@ func commandDelete(name: String) {
 
 func commandRename(from old: String, to new: String, force: Bool) {
     guard old != new else { fail("Source and destination must differ") }
+    guard releasableNames([old, new]) == [old, new] else { fail(ownerKeyRefusal) }
 
     let session = attempt { try Session.make() }
     let unlocked = attempt { try session.unlock(reason: "Rename \(old) to \(new)", requireService: true) }
@@ -146,7 +148,7 @@ func commandList(_ arguments: [String]) {
 func commandExport() {
     let session = attempt { try Session.make() }
     let unlocked = attempt { try session.unlock(reason: "Export all secrets") }
-    let names = unlocked.index.entries.keys.sorted()
+    let names = releasableNames(unlocked.index.entries.keys.sorted())
     let values = attempt {
         try session.store.values(of: names, index: unlocked.index, identity: unlocked.identity)
     }

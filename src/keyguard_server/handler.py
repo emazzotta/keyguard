@@ -7,7 +7,7 @@ import sys
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
-from . import access_log, bridge, cache, consent, encoding, keyguard_cli, phone
+from . import access_log, bridge, cache, consent, encoding, keyguard_cli, owner_sign, phone
 from .caller import PANE_HEADER, SESSION_HEADER, TITLE_HEADER, Caller
 from .config import (
     MAX_BRIDGE_OUTPUT_BYTES,
@@ -24,6 +24,7 @@ _LIST_ALL_PARAM = "all"
 _BROWSER_HEADERS = ("Origin", "Sec-Fetch-Site")
 _KEYS_PATH = "_keys"
 _CACHE_PATH = "_cache"
+_OWNER_SIGN_PATH = "_owner/sign"
 
 
 class KeyguardHandler(BaseHTTPRequestHandler):
@@ -63,6 +64,14 @@ class KeyguardHandler(BaseHTTPRequestHandler):
             if body is None:
                 return
             self._handle_bridge("POST", path[len(_BRIDGE_PREFIX):], parse_qs(parsed.query), body=body)
+            return
+
+        if path == _OWNER_SIGN_PATH:
+            self._handle_owner_sign()
+            return
+
+        if path == owner_sign.OWNER_KEY_NAME:
+            self._respond(403, owner_sign.OWNER_KEY_REFUSED.encode())
             return
 
         if not path or "," in path or path == _KEYS_PATH:
@@ -118,6 +127,9 @@ class KeyguardHandler(BaseHTTPRequestHandler):
 
     def _handle_get(self, path: str, query: dict[str, list[str]]) -> None:
         keys = [k.strip() for k in path.split(",") if k.strip()]
+        if owner_sign.OWNER_KEY_NAME in keys:
+            self._respond(403, owner_sign.OWNER_KEY_REFUSED.encode())
+            return
         client_ip = self.client_address[0]
         source_hint = self.headers.get("X-Keyguard-Source")
         timeout = encoding.parse_timeout(query, MAX_CACHE_TIMEOUT)
@@ -161,6 +173,26 @@ class KeyguardHandler(BaseHTTPRequestHandler):
         if client is None:
             return phone.touch_id_alone(keys, self._caller, cache_duration=cache_duration)
         return phone.race(keys, self._caller, client, cache_duration=cache_duration)
+
+    # ---- Owner signature ----
+
+    def _handle_owner_sign(self) -> None:
+        if self._is_browser_request():
+            self._respond(403, b"Owner signatures refuse requests sent by a browser")
+            return
+        client = phone.configured()
+        if client is None:
+            self._respond(503, b"Owner signatures need the phone client: KEYGUARD_STORE_URL, its client and key")
+            return
+        body = self._read_body(required=True)
+        if body is None:
+            return
+        request = owner_sign.parse(body)
+        if request is None:
+            self._respond(400, b"The body must be a JSON object with the strings text, target, box and title")
+            return
+        signed = owner_sign.sign(request, self._caller, client)
+        self._respond(signed.status, signed.body.encode())
 
     # ---- Bridge handler ----
 

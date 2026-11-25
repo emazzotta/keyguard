@@ -110,6 +110,13 @@ struct TestRunner {
         checkStr("should leave out an empty caller",
                  buildReason(base: "List secrets", cacheDuration: 60, caller: ""), "List secrets, cached for 60s")
 
+        print("\nthe owner key")
+        checkStr("should name the owner key the approve page signs with", ownerKeyName, "KEYGUARD_OWNER_SIGNING_KEY")
+        checkStr("should leave the owner key out of what a read may release",
+                 releasableNames(["A_TOKEN", "KEYGUARD_OWNER_SIGNING_KEY", "B_TOKEN"]).joined(separator: ","),
+                 "A_TOKEN,B_TOKEN")
+        checkStr("should keep every other name", releasableNames(["B", "A"]).joined(separator: ","), "B,A")
+
         if failures > 0 {
             fputs("\n\(failures) failure(s)\n", stderr)
             exit(1)

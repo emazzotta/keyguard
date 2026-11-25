@@ -211,6 +211,41 @@ A failed secret read sends one line to Telegram. The unlock service posts `❌�
 - Sending never changes a read. It runs in a background thread after the read has ended. A failed post is logged to stderr without its text (`failure report not sent (HTTP 429)`), is never retried and changes neither the HTTP answer nor the exit status. Without `KEYGUARD_STORE_URL` nothing is sent.
 - Known gaps: a phone request that the service loses (a service restart) and a phone answer that arrives but cannot be used end the read without a line. A client that hangs until the deadline without ever printing its approve line is silent too. Only reads of secrets (`GET /<NAMES>`) are reported, not key lists, writes or bridge consent.
 
+## Owner signatures
+
+A session asks for a message signed as the owner with `POST /_owner/sign`, as dotfiles `fleet send --as-owner` does. The server hands it to the keyguard-passkey client as requester `mac`, and you approve on the approve page: in the web terminal's Keyguard sheet with Touch ID, or on the phone. The page signs ([keyguard-passkey `docs/service.md`, Owner Signatures](https://github.com/emazzotta/keyguard-passkey/blob/main/docs/service.md#owner-signatures)); the server only passes the finished token on.
+
+```bash
+curl -s -X POST http://host.docker.internal:7777/_owner/sign -H 'Content-Type: application/json' \
+  -d '{"text": "yes, push personal-infra 06be524c", "target": "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57", "box": "macbook", "title": "Mazzotta-bot"}'
+```
+
+| Answer | When |
+|---|---|
+| `200` with the token | you approved |
+| `400` | the body is not a JSON object with the strings `text`, `target`, `box` and an optional `title`, or the client refused the message, with its reason |
+| `403` | a browser sent it (`Origin` or `Sec-Fetch-Site`), or you refused on the page |
+| `404` | the store holds no `KEYGUARD_OWNER_SIGNING_KEY` |
+| `502` | the client failed otherwise, with its reason |
+| `503` | the phone fallback is off: no `KEYGUARD_STORE_URL`, client or signing key |
+| `504` | no answer in time: the request expired on the service, or 345 s passed |
+
+- The server checks the shape only. The client and the page check the rest.
+- `X-Keyguard-Session`, `X-Keyguard-Title` and `X-Keyguard-Pane` name the asking session on the page, as for a read.
+- There is no Touch ID dialog of keyguard's own: the Mac holds no owner key in a file, and the page is the only signer.
+
+The owner key, `KEYGUARD_OWNER_SIGNING_KEY` in the store, is never released:
+
+- `GET /<NAMES>` that names it, and `POST /KEYGUARD_OWNER_SIGNING_KEY`, answer `403` before any prompt.
+- `keyguard get` refuses it, `keyguard export` leaves it out, and `keyguard mv` refuses it as source and as target.
+- `keyguard set KEYGUARD_OWNER_SIGNING_KEY`, run at the Mac, stores it. Create it once, and pin the public half that the last command prints:
+
+```bash
+pem=$("$(brew --prefix openssl@3)/bin/openssl" genpkey -algorithm ed25519) &&
+  printf '%s\n' "$pem" | keyguard set KEYGUARD_OWNER_SIGNING_KEY &&
+  printf '%s\n' "$pem" | "$(brew --prefix openssl@3)/bin/openssl" pkey -pubout -outform DER | tail -c 32 | base64
+```
+
 ## Bridge endpoints
 
 The bridge lets you expose whitelisted Mac commands over HTTP. A Docker container can trigger a Spotify pause, send a system notification, or call any script you pre-approve — without SSH, without scripting on the host, and without exposing arbitrary command execution.
@@ -498,6 +533,7 @@ platforms. Everything else under test is the code that ships.
 | Inline `keyguard set KEY value` | Warning printed to stderr — use the interactive prompt instead |
 | `POST /<name>` from container | Value piped to `keyguard` via stdin — never appears in process args or `ps` |
 | Exported identity leaked | Touch ID required to export; not available over HTTP; stderr warning reminds user to store safely |
+| A session reads or replaces the owner signing key | `KEYGUARD_OWNER_SIGNING_KEY` is refused by `GET`, `POST`, `get`, `mv` and left out of `export`; only the approve page decrypts it, to sign one message you approved |
 
 ### Encryption details
 
