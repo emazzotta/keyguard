@@ -169,14 +169,14 @@ Claude on dev box
 
 ⏳ Waiting for your OK to push 2 commits.
 
-Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
-[session 4a015f0f]
+devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
+[session 4a015f0f (Telegram alert layout)]
 ```
 
 - The heading is bold. It names the caller from how it authenticated (`KEYGUARD_PASSKEY_TOKEN_LABEL` or `KEYGUARD_PASSKEY_IDENTITY_LABEL`), not from the body, and stops at 60 characters.
 - The text opens with ⏳ for a prompt and 💬 for a finished reply. It loses control and format characters and stops at 300 characters.
-- The line above the marker holds the title and the container, when the body names them, and the session as code, which a tap copies. The title loses control and format characters like the text and stops at 60 characters.
-- The last line is the marker: `[session `, the first 8 characters of the session, `]`. The Telegram bot reads it from the message that a reply quotes, so a reply to any ping goes to its session.
+- The line above the marker holds the container, when the body names it, and the session as code, which a tap copies.
+- The last line is the marker: `[session `, the first 8 characters of the session, then ` (`, the title and `)]`, or only `]` when the body names no title. The title loses control and format characters like the text and stops at 60 characters. The Telegram bot reads the marker from the message that a reply quotes, so a reply to any ping goes to its session; it takes the 8 characters and ignores the title (its BR-016). A notice without a session has no marker, and its title stays in the line above.
 
 ### Answers
 
@@ -202,8 +202,8 @@ Claude on dev box
 
 Open the session in Safari
 
-Telegram alert layout · devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
-[session 4a015f0f]
+devbox-7f7d78d989-tgd9t · 4a015f0f-199b-4270-9c06-fecc5d85b976
+[session 4a015f0f (Telegram alert layout)]
 ```
 
 ### Spoken Answers
@@ -227,7 +227,7 @@ sequenceDiagram
 
 - It hands over an answer only after its messages went out, in the same background thread, so the voice never delays the text.
 - It hands over nothing when Telegram took none of the messages: the voice needs a message to reply to.
-- The body is `{"session", "text", "presence", "seen", "reply_to"}`: the session's UUID, the text as the messages carry it (redacted and cut like them), the presence (`unknown` when the notice named none), `seen` or `null`, and the id of the first message that Telegram took.
+- The body is `{"session", "text", "presence", "seen", "reply_to", "title"}`: the session's UUID, the text as the messages carry it (redacted and cut like them), the presence (`unknown` when the notice named none), `seen` or `null`, the id of the first message that Telegram took, and the title as the marker shows it, before HTML escaping, or `null`. The bot puts the title into the marker that captions the voice.
 - It waits 10 seconds for the bot. Any failure is one line, such as `spoken answer: not sent (HTTP 401)`, without the text or the token. It never retries.
 
 ## Keyguard Notices
@@ -251,20 +251,20 @@ The service sees an expiry in its sweep, every 15 seconds, or in the next call t
 
 Approve in Safari
 
-Plan the migration · devbox-7f7d78d989-tgd9t
-[session 4a015f0f]
+devbox-7f7d78d989-tgd9t
+[session 4a015f0f (Plan the migration)]
 ```
 
 ```
 ❌🔐 Request expired with no answer: dev box asked to read 2 variables.
 
-Plan the migration · devbox-7f7d78d989-tgd9t
-[session 4a015f0f]
+devbox-7f7d78d989-tgd9t
+[session 4a015f0f (Plan the migration)]
 ```
 
 - The text names the requester by its label in `KEYGUARD_PASSKEY_REQUESTERS` (`an unlisted machine` when the id has none), the operation (`read`, `set`, `remove` or `list the variable names`) and the number of variables. It never names a variable.
 - The link `Approve in Safari` goes to `KEYGUARD_PASSKEY_PUBLIC_URL/approve?id=<id>`. Without that setting the notice has no link. The service builds it from the setting and the id, never from the request. Telegram's own browser cannot use a passkey, hence Safari.
-- The line above the marker holds the request's `title` and its container, when it has them. It has no session code: the service knows 8 characters of the session, not the UUID. The marker is the first 8 characters of the request's signed `session` field. A request with no `session` has no marker, and a reply to its notice has no session to continue.
+- The line above the marker holds the request's container, when it has one. It has no session code: the service knows 8 characters of the session, not the UUID. The marker is the first 8 characters of the request's signed `session` field with the request's `title`, as for a ping. A request with no `session` has no marker, its title stays in the line above, and a reply to its notice has no session to continue.
 - These notices do not count against the 20 a minute of `/notify`: the limit on new requests bounds them. A notice that cannot be sent is logged without its text and never fails or delays the request.
 
 ### The `notify` Field of a Request
@@ -318,7 +318,7 @@ Mac keyguard · devbox-7f7d78d989-tgd9t
 ```
 
 - The answers are `202`, `400` and `429` of a ping, and the 20 a minute are shared with the pings.
-- The message has no heading and opens with `❌🔐`. The code of the session appears only for a full UUID, and the marker only when the body names a session. A body with no session, title and container is the text alone.
+- The message has no heading and opens with `❌🔐`. The code of the session appears only for a full UUID, and the marker only when the body names a session. The title names the caller, not the session, so it stays in the line above and the marker has no title. A body with no session, title and container is the text alone.
 - The service refuses `keyguard_wait` with `400`: only the service posts it, because it decides from the presence. Post a failure line only for a request that this service does not hold, or the chat gets two.
 
 ## Owner Signatures

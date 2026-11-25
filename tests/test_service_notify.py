@@ -44,7 +44,7 @@ HOURGLASS = "\u23f3"
 PARTY = chr(0x1F389)
 FAKE_TOKEN = "987654321:AAFakeScrubberTestSecret01234567-_x"
 TERMINAL = "https://terminal.example.test"
-BOT_MARKER = re.compile(r"^\[session ([0-9A-Za-z]{8})\]\s*\Z", re.MULTILINE)
+BOT_MARKER = re.compile(r"^\[session ([0-9A-Za-z]{8})(?: \(.*\))?\]\s*\Z", re.MULTILINE)
 
 
 def run_inline(function, *args):
@@ -162,11 +162,11 @@ def test_should_leave_out_the_container_when_the_notice_has_none():
 
 
 @pytest.mark.spec("docs/service.md")
-def test_should_put_the_title_before_container_and_session():
+def test_should_name_the_title_in_the_marker_and_not_in_the_line_above():
     message = notice_message(parse_notice(notice(title="Telegram alert layout"), ORIGIN))
 
-    assert footer_line(message) == (
-        f"Telegram alert layout \u00b7 devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>")
+    assert message.splitlines()[-2:] == [
+        f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f (Telegram alert layout)]"]
 
 
 @pytest.mark.spec("docs/service.md")
@@ -174,15 +174,14 @@ def test_should_put_the_title_before_container_and_session():
 def test_should_leave_out_a_missing_or_blank_title(title):
     message = notice_message(parse_notice(notice(**title), ORIGIN))
 
-    assert footer_line(message) == f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>"
+    assert message.splitlines()[-2:] == [f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f]"]
 
 
 @pytest.mark.spec("docs/service.md")
 def test_should_cap_the_title_before_escaping_it():
     message = notice_message(parse_notice(notice(title="<i>" + "x" * 100, container=None), ORIGIN))
 
-    assert footer_line(message) == (
-        "&lt;i&gt;" + "x" * (NOTICE_TITLE_LIMIT - 4) + f"\u2026 \u00b7 <code>{SESSION}</code>")
+    assert message.splitlines()[-1] == "[session 4a015f0f (&lt;i&gt;" + "x" * (NOTICE_TITLE_LIMIT - 4) + "\u2026)]"
 
 
 @pytest.mark.spec("docs/service.md")
@@ -206,7 +205,7 @@ def test_should_end_every_ping_with_the_marker_the_bot_reads_from_a_reply(kind):
 
     assert found is not None
     assert found.group(1) == SESSION[:8]
-    assert message.splitlines()[-1] == "[session 4a015f0f]"
+    assert message.splitlines()[-1] == "[session 4a015f0f (&lt;b&gt;Plan&lt;/b&gt; &amp; more)]"
 
 
 @pytest.mark.spec("docs/service.md")
@@ -368,7 +367,7 @@ def test_should_send_a_short_answer_as_one_message_that_ends_like_a_ping():
     message, = messages_of(answer(title="Plan"))
 
     assert message.splitlines()[-2:] == [
-        f"Plan \u00b7 devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f]"]
+        f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f (Plan)]"]
     assert "(1/1)" not in message
 
 
@@ -457,7 +456,7 @@ def test_should_end_an_answer_that_is_one_unit_over_three_messages_with_the_note
     assert CUT_NOTE not in first and CUT_NOTE not in second
     assert third.splitlines()[-6:] == [
         CUT_NOTE, "", f'<a href="{link}">Open the session in Safari</a>', "",
-        f"Plan \u00b7 devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f]"]
+        f"devbox-7f7d78d989-tgd9t \u00b7 <code>{SESSION}</code>", "[session 4a015f0f (Plan)]"]
     assert all(shown_units(message) <= MESSAGE_LIMIT for message in (first, second, third))
 
 
@@ -577,6 +576,13 @@ def test_should_open_a_failure_line_with_its_mark_and_no_heading():
 
     assert message.splitlines() == [f"{FAILED_MARK} Request expired with no answer.", "", "Plan \u00b7 box-1",
                                     "[session 4a015f0f]"]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_title_of_a_posted_failure_line_as_its_caller_above_a_bare_marker():
+    message = notice_message(parse_notice(failure(session=SHORT, title="Mac keyguard"), ORIGIN))
+
+    assert message.splitlines()[-2:] == ["Mac keyguard", "[session 4a015f0f]"]
 
 
 @pytest.mark.spec("docs/service.md")

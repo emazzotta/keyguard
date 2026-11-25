@@ -202,7 +202,16 @@ def test_should_write_the_wait_notice_with_its_mark_first_and_the_approve_link(q
     assert message.splitlines() == [
         f"{LOCK_MARK} Waiting for your approval: dev box asks to read 2 variables.", "",
         f'<a href="{PUBLIC_URL}/approve?id={request_id}">Approve in Safari</a>', "",
-        "Plan the migration \u00b7 box-1", "[session 4a015f0f]"]
+        "box-1", "[session 4a015f0f (Plan the migration)]"]
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_keep_the_title_above_when_the_request_names_no_session(queue, notifier):
+    queue.create(payload(session=None))
+
+    message, = notice_messages(notifier.notices[0])
+
+    assert message.splitlines()[-1] == "Plan the migration \u00b7 box-1"
 
 
 @pytest.mark.spec("docs/service.md")
@@ -214,7 +223,7 @@ def test_should_write_the_failure_line_with_its_mark_first(queue, notifier, cloc
 
     assert message.splitlines() == [
         f"{FAILED_MARK} Request expired with no answer: dev box asked to read 2 variables.", "",
-        "Plan the migration \u00b7 box-1", "[session 4a015f0f]"]
+        "box-1", "[session 4a015f0f (Plan the migration)]"]
 
 
 @pytest.mark.spec("docs/service.md")

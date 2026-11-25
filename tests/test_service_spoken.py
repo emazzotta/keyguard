@@ -20,8 +20,8 @@ REPLY_TO = 501
 SEEN = 1_764_061_200
 
 
-def answer(presence: Presence = Presence.AWAY, seen: int | None = SEEN) -> ClaudeNotice:
-    return ClaudeNotice(SESSION, "devbox-7f7d78d989-tgd9t", TEXT, "dev box", NoticeKind.ANSWER,
+def answer(presence: Presence = Presence.AWAY, seen: int | None = SEEN, title: str | None = None) -> ClaudeNotice:
+    return ClaudeNotice(SESSION, "devbox-7f7d78d989-tgd9t", TEXT, "dev box", NoticeKind.ANSWER, title=title,
                         presence=presence, seen=seen)
 
 
@@ -36,7 +36,22 @@ def test_should_post_the_answer_to_the_bot_with_the_shared_token():
     assert request.get_header("Authorization") == f"Bearer {TOKEN}"
     assert request.get_header("Content-type") == "application/json"
     assert json.loads(request.data) == {"session": SESSION, "text": TEXT, "presence": "away", "seen": SEEN,
-                                        "reply_to": REPLY_TO}
+                                        "reply_to": REPLY_TO, "title": None}
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize(("title", "shown"), [
+    ("Weather inquiry", "Weather inquiry"),
+    ("Weather\n inquiry\u200b", "Weather inquiry"),
+    ("x" * 100, "x" * 59 + "\u2026"),
+    (" \n", None),
+])
+def test_should_hand_over_the_title_as_the_marker_shows_it(title, shown):
+    sent: list[urllib.request.Request] = []
+
+    SpokenAnswerRelay(URL, TOKEN, send=sent.append).relay(answer(title=title), REPLY_TO)
+
+    assert json.loads(sent[0].data)["title"] == shown
 
 
 @pytest.mark.spec("docs/service.md")

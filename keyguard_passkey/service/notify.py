@@ -46,6 +46,7 @@ SHORT_SESSION_LENGTH: Final = 8
 SHORT_SESSION: Final = re.compile(r"[0-9A-Za-z]{8}")
 UUID_LENGTH: Final = 36
 SESSION_MARKER: Final = "[session {short}]"
+TITLED_SESSION_MARKER: Final = "[session {short} ({title})]"
 PARSE_MODE: Final = "HTML"
 CHAT_PATH: Final = "/chat/"
 SEEN_LIMIT: Final = 10 ** 12
@@ -104,6 +105,7 @@ class ClaudeNotice:
     title: str | None = None
     link: str | None = None
     cut: bool = False
+    caller: str | None = None
     presence: Presence = Presence.UNKNOWN
     seen: int | None = None
 
@@ -121,6 +123,8 @@ def parse_notice(payload: object, origin: str) -> ClaudeNotice:
     kind = parse_kind(payload.get("kind", NoticeKind.FINISHED.value))
     session = parse_session(payload.get("session"), kind)
     raw = payload.get("text")
+    if kind is NoticeKind.KEYGUARD_FAILED:
+        return ClaudeNotice(session, container, parse_text(raw), origin, kind, caller=parse_title(payload.get("title")))
     if kind is not NoticeKind.ANSWER:
         return ClaudeNotice(session, container, parse_text(raw), origin, kind, parse_title(payload.get("title")))
     text, cut = parse_answer(raw)
@@ -190,6 +194,10 @@ def capped(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip() + ELLIPSIS
 
 
+def shown_title(title: str | None) -> str:
+    return capped(plain(title or ""), NOTICE_TITLE_LIMIT)
+
+
 def notice_messages(notice: ClaudeNotice) -> list[str]:
     return answer_messages(notice) if notice.kind is NoticeKind.ANSWER else [notice_message(notice)]
 
@@ -249,13 +257,21 @@ def _heading(notice: ClaudeNotice) -> str:
 
 
 def _footer(notice: ClaudeNotice) -> str:
-    """The title, the container and the session's UUID, when each is known, and under them the session marker."""
-    title = html.escape(capped(plain(notice.title or ""), NOTICE_TITLE_LIMIT), quote=False)
+    """The caller, the container and the session's UUID, when each is known, and under them the marker with the title.
+
+    A notice without a session has no marker, so its title stays in the line above.
+    """
+    title = html.escape(shown_title(notice.title), quote=False)
     session = notice.session or ""
     handle = f"<code>{session}</code>" if len(session) == UUID_LENGTH else ""
-    marker = SESSION_MARKER.format(short=session[:SHORT_SESSION_LENGTH]) if session else ""
-    line = SEPARATOR.join(part for part in (title, notice.container, handle) if part)
+    marker = _marker(session[:SHORT_SESSION_LENGTH], title) if session else ""
+    caller = html.escape(shown_title(notice.caller), quote=False)
+    line = SEPARATOR.join(part for part in (caller, "" if marker else title, notice.container, handle) if part)
     return "\n".join(part for part in (line, marker) if part)
+
+
+def _marker(short: str, title: str) -> str:
+    return TITLED_SESSION_MARKER.format(short=short, title=title) if title else SESSION_MARKER.format(short=short)
 
 
 def describe_failure(error: Exception) -> str:
