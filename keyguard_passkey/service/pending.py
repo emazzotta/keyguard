@@ -3,7 +3,8 @@
 Each waiting request leaves one file, then its outcome once the wait ends. `pending --watch` streams the open
 requests as JSON lines and `pending --cancel ID` makes the waiting process give up. A request of a session that expired
 unanswered stays listed until a later request of that session gets its answer, at most a day, so a watcher can mark
-the session. Files hold the request id, names, requester, link, session and title, never a value.
+the session; `pending --clear-expired=SESSION` forgets it once an approver answered the session outside the service.
+Files hold the request id, names, requester, link, session and title, never a value.
 """
 from __future__ import annotations
 
@@ -120,7 +121,7 @@ def announced(request: Request, directory: Path,
 
 
 def clear_expired(directory: Path, session: str) -> None:
-    """Forgets the expired requests of a session once a later one got its answer."""
+    """Forgets the expired requests of a session once a later one got its answer, here or outside the service."""
     for path in directory.glob("*.json"):
         record = _read(path)
         if record is not None and record.get("state") == State.EXPIRED.value and record.get("session") == session:

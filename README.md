@@ -69,7 +69,7 @@ Keep the paper passphrase away from the machine. It opens the store when the pas
 | `sign --target ID --box BOX [--title TITLE]` | Prints a token of the message on standard input, signed with the owner key for one session; service mode only ([docs/service.md](docs/service.md#owner-signatures)) |
 | `lock` | Drops the values held from earlier approvals |
 | `version` | Prints the version |
-| `pending` | Prints this machine's service requests that wait for an approval; `--watch` streams them |
+| `pending` | Prints this machine's service requests that wait for an approval; `--watch` streams them, `--clear-expired=SESSION` forgets a session's expired ones |
 | `serve` | Runs the unlock service ([docs/service.md](docs/service.md)) |
 | `verify-install` | Checks a vendored copy against its manifest ([docs/updating.md](docs/updating.md)) |
 

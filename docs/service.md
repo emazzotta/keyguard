@@ -119,7 +119,7 @@ Another proxy needs the same behaviour, and `KEYGUARD_PASSKEY_IDENTITY_HEADER` s
 
 Another device approves too once it has its own passkey: open `<service>/enroll` on it and choose "Add this device instead".
 
-The asking machine needs `age` and OpenSSL 3 on `PATH`: it signs with OpenSSL and decrypts the answer with `age`. Each approval reveals or changes the asked names only, and `set` and `rm` change one name each. `keyguard-passkey pending` lists the requests of this machine that wait for an approval, and `--watch` streams them as JSON lines for a terminal or status bar.
+The asking machine needs `age` and OpenSSL 3 on `PATH`: it signs with OpenSSL and decrypts the answer with `age`. Each approval reveals or changes the asked names only, and `set` and `rm` change one name each. `keyguard-passkey pending` lists the requests of this machine that wait for an approval, and `--watch` streams them as JSON lines for a terminal or status bar. `--clear-expired=SESSION` forgets the requests of that session that expired unanswered, as an answer to a later request of it does: an approver on this machine that answers the session outside the service, such as keyguard's Touch ID, runs it.
 
 ## HTTP API
 

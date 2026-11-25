@@ -31,6 +31,7 @@ from .hold import (
 from .service import client, connection, pending
 from .service.asking import ServiceAsk, UsageError
 from .service.message import OwnerMessage
+from .service.requests import SESSION_ID
 from .service.server import serve
 from .service.settings import SettingsError, settings_from_env
 from .store import Store
@@ -154,6 +155,8 @@ def add_pending_parser(verbs: argparse._SubParsersAction[Parser]) -> None:
     mode = lister.add_mutually_exclusive_group()
     mode.add_argument("--watch", action="store_true", help="stream changes as JSON lines until stopped")
     mode.add_argument("--cancel", metavar="ID", help="make the command that waits on this request give up")
+    mode.add_argument("--clear-expired", metavar="SESSION",
+                      help="forget the expired requests of a session that an approver answered another way")
     lister.add_argument("--dir", type=Path, help=f"where requests are recorded (default: ${connection.PENDING_ENV}, "
                                                   "else pending in the state folder)")
 
@@ -384,6 +387,11 @@ def run_pending(app: App, args: argparse.Namespace) -> int:
     if args.cancel is not None:
         if not pending.cancel(folder, args.cancel, time.time()):
             raise Failure(f"no request {args.cancel!r} waits for an answer", EXIT_ERROR)
+        return 0
+    if args.clear_expired is not None:
+        if not SESSION_ID.fullmatch(args.clear_expired):
+            raise Failure(f"not a session id: {args.clear_expired!r}", EXIT_USAGE)
+        pending.clear_expired(folder, args.clear_expired)
         return 0
     if not args.watch:
         app.stdout.write(json.dumps({"pending": pending.snapshot(folder, time.time())}) + "\n")

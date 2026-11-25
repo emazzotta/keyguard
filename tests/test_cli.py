@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
 import io
 import json
@@ -15,7 +16,7 @@ from conftest import REQUESTER, opened, owner_token, signs_the_shown_message
 from keyguard_passkey import cli, install
 from keyguard_passkey.ceremony import Op
 from keyguard_passkey.hold import HoldError, scope_of, scope_of_service
-from keyguard_passkey.service import client, connection
+from keyguard_passkey.service import client, connection, pending
 from keyguard_passkey.service.asking import UsageError
 from keyguard_passkey.store import Store
 
@@ -23,6 +24,7 @@ SERVICE_URL = "https://unlock.example.test"
 MISSED_ANSWER_TIMEOUT = 5.0
 WAITING_ID = "-bCdEfGh12345678"
 TARGET = "212df38e-7c4b-4a51-9d0e-3f6b2a8c1e57"
+SESSION = "48f92bcb"
 
 
 class Asked:
@@ -679,11 +681,11 @@ def test_should_point_init_at_the_enrol_page_of_the_service(service_cli, unlock_
     assert stderr.seen == []
 
 
-def waiting_record(folder, request_id=WAITING_ID):
+def waiting_record(folder, request_id=WAITING_ID, **fields):
     folder.mkdir(parents=True, exist_ok=True)
     record = {"id": request_id, "vars": ["A"], "op": "get", "state": "waiting", "host": REQUESTER,
               "link": f"{SERVICE_URL}/approve?id={request_id}", "created": time.time(), "ended": None,
-              "pid": os.getpid()}
+              "pid": os.getpid(), **fields}
     (folder / f"{request_id}.json").write_text(json.dumps(record))
     return record
 
@@ -722,3 +724,41 @@ def test_should_name_the_request_it_could_not_cancel(clean_environment, tmp_path
     assert cli.main(["pending", "--dir", str(tmp_path / "pending"), "--cancel", "Unknown000000001"]) == 1
 
     assert "no request 'Unknown000000001' waits for an answer" in capsys.readouterr().err
+
+
+def expired_request(folder, request_id, session):
+    request = pending.Request(id=request_id, vars=("A",), op="get", host=REQUESTER,
+                              link=f"{SERVICE_URL}/approve?id={request_id}", session=session)
+    with contextlib.suppress(TimeoutError), pending.announced(request, folder, expired=(TimeoutError,)):
+        raise TimeoutError("the approver never answered")
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_forget_only_the_expired_requests_of_the_named_session(clean_environment, tmp_path):
+    folder = tmp_path / "pending"
+    expired_request(folder, "Expired00000001", SESSION)
+    expired_request(folder, "OtherSession001", "0badc0de")
+    waiting_record(folder, session=SESSION)
+
+    assert cli.main(["pending", "--dir", str(folder), f"--clear-expired={SESSION}"]) == 0
+
+    assert sorted(path.stem for path in folder.glob("*.json")) == [WAITING_ID, "OtherSession001"]
+
+
+@pytest.mark.spec("docs/service.md")
+@pytest.mark.parametrize("session", ["", "48f92bcb-1c2d-4e5f-8a9b-0c1d2e3f4a5b", "48f92bc"])
+def test_should_refuse_a_session_id_that_no_request_could_carry(clean_environment, tmp_path, capsys, session):
+    folder = tmp_path / "pending"
+    expired_request(folder, "Expired00000001", SESSION)
+
+    assert cli.main(["pending", "--dir", str(folder), f"--clear-expired={session}"]) == 64
+
+    assert f"not a session id: {session!r}" in capsys.readouterr().err
+    assert (folder / "Expired00000001.json").exists()
+
+
+@pytest.mark.spec("docs/service.md")
+def test_should_succeed_with_nothing_to_clear_when_no_request_was_ever_recorded(clean_environment, tmp_path):
+    assert cli.main(["pending", "--dir", str(tmp_path / "pending"), f"--clear-expired={SESSION}"]) == 0
+
+    assert not (tmp_path / "pending").exists()
