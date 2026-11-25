@@ -34,7 +34,7 @@ docker run -d --name keyguard-passkey --restart unless-stopped \
   -e KEYGUARD_PASSKEY_ALLOWED_LOGINS=you@example.com \
   -e KEYGUARD_PASSKEY_REQUESTERS='devbox=dev box' \
   -e KEYGUARD_PASSKEY_REQUEST_TOKEN="$(cat request-token)" \
-  ghcr.io/emazzotta/keyguard-passkey:0.6.0
+  ghcr.io/emazzotta/keyguard-passkey:0.7.0
 ```
 
 Each machine that asks gets a copy of `request-token` ([First Setup](#first-setup)).
