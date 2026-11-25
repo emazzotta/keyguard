@@ -2,6 +2,8 @@
 
 A release is a tag `vX.Y.Z` on this repository. `keyguard-passkey version` prints the release that runs.
 
+Cut one in two pushes: the release commit to `main` first, then the tag once that commit's pipeline is green, `test (3.9)` included. The tag's pipeline publishes the GitHub release only when every test passes, so a tag pushed with a failing commit stays without a release, as `v0.7.0` did. Type checking runs against Python 3.10, the oldest version mypy accepts, so only `test (3.9)` catches code that Python 3.9 cannot import.
+
 The client never fetches or replaces itself. An update is a step that you, your package manager or your organisation's repository starts.
 
 ## Update Channel per Install
