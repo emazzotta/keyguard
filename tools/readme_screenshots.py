@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Take the README's pictures from the real pages, with a virtual authenticator and a store of demo values.
+
+uv run --locked --with playwright==1.63.0 --with pillow python3 tools/readme_screenshots.py
+
+The pages name macOS system fonts. Where those are missing, install Source Serif 4, Inter and JetBrains Mono:
+the pictures then use them in their place.
+"""
+from __future__ import annotations
+
+import argparse
+import html
+import io
+import os
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Final
+
+REPOSITORY: Final = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPOSITORY / "tests"))
+
+from browser import (  # type: ignore[import-not-found]
+    PASSPHRASE,
+    Running,
+    approve,
+    run_verb,
+    wait_until_answered,
+    with_authenticator,
+)
+from PIL import Image  # type: ignore[import-not-found]
+from playwright import sync_api  # type: ignore[import-not-found]
+
+SCALE: Final = 2
+VIEWPORT: Final = {"width": 760, "height": 900}
+SCHEMES: Final = ("light", "dark")
+TOP_MARGIN_PX: Final = 56
+BOTTOM_MARGIN_PX: Final = 48
+COLOURS: Final = 256
+DEMO_SECRETS: Final = "GITHUB_TOKEN=demo-token-1\nDATABASE_URL=demo-url-2\nSTRIPE_KEY=demo-key-3\n"
+SESSION_ENV: Final = {"KEYGUARD_SESSION": "4b7e19c2", "KEYGUARD_TITLE": "Deploy the staging release"}
+ASKED: Final = ("GITHUB_TOKEN", "DATABASE_URL")
+BROWSER_ASK: Final = "Approve in the browser tab that opened."
+DEPLOY_SCRIPT: Final = '#!/bin/sh\necho "Deploying staging with a ${#GITHUB_TOKEN}-character token... done"\n'
+FONTS: Final = """:root:root { --font-display: "Source Serif 4", serif; --font-body: "Inter Variable", sans-serif;
+  --font-mono: "JetBrains Mono", monospace; }"""
+TERMINAL_PAGE: Final = """<!doctype html><meta charset="utf-8"><style>
+body { margin: 0; padding: 28px; font: 14px/1.6 "JetBrains Mono", monospace; }
+.window { width: 720px; background: #101512; color: #d7e0d9; border-radius: 12px; overflow: hidden; }
+.bar { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #1a211c; }
+.bar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.bar span { margin-left: 12px; color: #7f8c83; font-size: 12px; }
+pre { margin: 0; padding: 18px 22px 22px; font: inherit; white-space: pre-wrap; }
+.prompt { color: #6fcf97; } .cmd { color: #f2f5f3; } .note { color: #e2b866; } .out { color: #aab6ad; }
+</style><div class="window"><div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i>
+<i style="background:#28c840"></i><span>~/my-project</span></div><pre>SESSION</pre></div>"""
+
+
+@dataclass(frozen=True)
+class Step:
+    command: str
+    output: str
+
+
+def save(png: bytes, path: Path) -> None:
+    """Quantised to a palette: the background gradient keeps a full-colour picture near 300 KB."""
+    image = Image.open(io.BytesIO(png))
+    method = Image.Quantize.FASTOCTREE if image.mode == "RGBA" else Image.Quantize.MEDIANCUT
+    image.quantize(colors=COLOURS, method=method, dither=Image.Dither.FLOYDSTEINBERG).save(path, optimize=True)
+    print(path)
+
+
+def shoot(page: sync_api.Page, path: Path) -> None:
+    page.add_style_tag(content=FONTS)
+    page.evaluate("() => { document.activeElement?.blur(); return document.fonts.ready.then(() => true) }")
+    box = page.locator("main").bounding_box()
+    top = max(box["y"] - TOP_MARGIN_PX, 0)
+    bottom = min(box["y"] + box["height"] + BOTTOM_MARGIN_PX, VIEWPORT["height"])
+    save(page.screenshot(clip={"x": 0, "y": top, "width": VIEWPORT["width"], "height": bottom - top}), path)
+
+
+def new_page(browser: sync_api.Browser, scheme: str) -> sync_api.Page:
+    """The font override needs the page's style-src 'self' lifted, in this browser only."""
+    context = browser.new_context(viewport=VIEWPORT, device_scale_factor=SCALE, color_scheme=scheme,
+                                  reduced_motion="reduce", bypass_csp=True)
+    return with_authenticator(context.new_page()).page
+
+
+def capture_pages(browser: sync_api.Browser, scheme: str, folder: Path, out: Path) -> None:
+    page = new_page(browser, scheme)
+    store = folder / scheme / "store"
+    store.parent.mkdir()
+    enrolling = Running(store, ("init",), None, None)
+    page.goto(enrolling.address)
+    page.wait_for_selector("#enrol:enabled")
+    page.fill("#pass", PASSPHRASE)
+    page.fill("#pass2", PASSPHRASE)
+    shoot(page, out / f"init-{scheme}.png")
+    approve(page, PASSPHRASE)
+    assert enrolling.finish()[0] == 0
+
+    source = store.parent / "secrets.env"
+    source.write_text(DEMO_SECRETS, encoding="utf-8")
+    assert run_verb(page, store, "import", str(source))[0] == 0
+    asking = Running(store, ("get", *ASKED), None, SESSION_ENV)
+    page.goto(asking.address)
+    page.wait_for_selector("#approve:enabled")
+    shoot(page, out / f"approve-{scheme}.png")
+    page.click("#approve")
+    wait_until_answered(page)
+    assert asking.finish()[0] == 0
+    page.context.close()
+
+
+def run_step(page: sync_api.Page, store: Path, shown: str, *args: str) -> Step:
+    running = Running(store, args, None, None)
+    page.goto(running.address)
+    approve(page)
+    code, printed = running.finish()
+    told = running.process.stderr.read()
+    assert code == 0, told
+    return Step(f"keyguard-passkey {shown}", told + printed)
+
+
+def capture_terminal(browser: sync_api.Browser, folder: Path, out: Path) -> None:
+    """Real output of each command; the browser branch prints BROWSER_ASK where --no-browser prints the address."""
+    page = new_page(browser, "dark")
+    store = folder / "terminal" / "store"
+    store.parent.mkdir()
+    assert run_verb(page, store, "init", passphrase=PASSPHRASE)[0] == 0
+    (folder / "secrets.env").write_text(DEMO_SECRETS, encoding="utf-8")
+    deploy = folder / "deploy.sh"
+    deploy.write_text(DEPLOY_SCRIPT, encoding="utf-8")
+    deploy.chmod(0o755)
+    steps = [
+        run_step(page, store, "import secrets.env", "import", str(folder / "secrets.env")),
+        run_step(page, store, "list", "list"),
+        run_step(page, store, "exec GITHUB_TOKEN -- ./deploy.sh", "exec", "GITHUB_TOKEN", "--", str(deploy)),
+    ]
+    page.set_content(TERMINAL_PAGE.replace("SESSION", render(steps, folder)))
+    page.evaluate("() => document.fonts.ready.then(() => true)")
+    save(page.locator(".window").screenshot(omit_background=True), out / "terminal.png")
+    page.context.close()
+
+
+def render(steps: list[Step], folder: Path) -> str:
+    blocks = []
+    for step in steps:
+        lines = [f'<span class="prompt">$</span> <span class="cmd">{html.escape(step.command)}</span>',
+                 f'<span class="note">{BROWSER_ASK}</span>']
+        output = step.output.replace(str(folder) + os.sep, "").rstrip("\n")
+        if output:
+            lines.append(f'<span class="out">{html.escape(output)}</span>')
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", type=Path, default=REPOSITORY / "docs" / "images", help="folder for the pictures")
+    out: Path = parser.parse_args().out
+    out.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as folder, sync_api.sync_playwright() as playwright:
+        browser = playwright.chromium.launch(args=["--disable-dev-shm-usage"])
+        for scheme in SCHEMES:
+            capture_pages(browser, scheme, Path(folder), out)
+        capture_terminal(browser, Path(folder), out)
+        browser.close()
+
+
+if __name__ == "__main__":
+    main()

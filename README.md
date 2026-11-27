@@ -195,6 +195,8 @@ uv run --locked --with playwright==1.63.0 pytest tests/test_end_to_end.py
 
 `spike/localhost-passkey` is the probe that measures one browser and authenticator.
 
+`tools/readme_screenshots.py` takes this README's pictures again, from the pages in the same browser.
+
 ## Third-Party Code
 
 `keyguard_passkey/pages/typage.js` is a bundle of [typage](https://github.com/FiloSottile/typage) 0.3.1 (BSD-3-Clause) and of its dependencies from the noble and scure packages (MIT). [typage.LICENSES.txt](keyguard_passkey/pages/typage.LICENSES.txt) beside it holds each licence.
