@@ -296,12 +296,16 @@ export const unlockSource = (meta, stored) => {
   return name ? { name, passkey: null, handle: passkeyPath(name) } : null
 }
 
+export const namedEnrolment = (meta, name) => (enrolmentNames(meta).includes(name)
+  ? { name, passkey: null, handle: published(meta, name) ? passkeyPath(name) : null }
+  : null)
+
 export const approvalEnrolment = (meta, stored) => {
   const names = enrolmentNames(meta)
   const name = names.includes(stored.name) ? stored.name : names.length === 1 ? names[0] : null
   if (!name) return null
   if (stored.passkey && name === stored.name) return { name, passkey: stored.passkey }
-  return { name, passkey: null, handle: published(meta, name) ? passkeyPath(name) : null }
+  return namedEnrolment(meta, name)
 }
 
 export const storedEnrolment = (storage = globalThis.localStorage) => {
@@ -314,7 +318,8 @@ export const storedEnrolment = (storage = globalThis.localStorage) => {
 
 export const rememberEnrolment = (name, passkey, storage = globalThis.localStorage) => {
   storage.setItem(DEVICE_KEY, name)
-  storage.setItem(PASSKEY_KEY, passkey)
+  if (passkey) storage.setItem(PASSKEY_KEY, passkey)
+  else storage.removeItem(PASSKEY_KEY)
 }
 
 export const passkeyName = (name, date = new Date()) => `Keyguard (${name}, ${date.toISOString().slice(0, 10)})`

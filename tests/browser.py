@@ -83,6 +83,10 @@ class Browser:
     def passkeys(self) -> list[dict[str, object]]:
         return self.devtools.send("WebAuthn.getCredentials", {"authenticatorId": self.authenticator})["credentials"]
 
+    def forget(self, credential_id: str) -> None:
+        removed = {"authenticatorId": self.authenticator, "credentialId": credential_id}
+        self.devtools.send("WebAuthn.removeCredential", removed)
+
 
 @contextmanager
 def browser_with_authenticator(headers: dict[str, str] | None = None) -> Iterator[Browser]:

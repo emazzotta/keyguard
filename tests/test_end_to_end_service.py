@@ -402,6 +402,37 @@ def test_should_add_this_device_with_a_passkey_of_its_own(page, service, browser
     assert used["signCount"] > added["signCount"]
 
 
+STORED_ENROLMENT = "['keyguard.device', 'keyguard.passkey'].map((key) => [key, localStorage.getItem(key)])"
+RESTORE_ENROLMENT = """(kept) => kept.forEach(([key, value]) =>
+  value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value))"""
+
+
+def test_should_let_a_browser_without_an_enrolment_pick_one_of_several_and_keep_it(page, service, browser):
+    known = {passkey["credentialId"] for passkey in browser.passkeys()}
+    page.goto(f"{service.base}/enroll")
+    kept = page.evaluate(STORED_ENROLMENT)
+    page.fill("#name", "picked")
+    page.click("#add-device")
+    page.wait_for_selector("#status.ok")
+    added = [passkey["credentialId"] for passkey in browser.passkeys() if passkey["credentialId"] not in known]
+    try:
+        page.evaluate(RESTORE_ENROLMENT, [[key, None] for key, _value in kept])
+        asking = Asking(service, "get", "API_TOKEN")
+        page.goto(asking.link)
+        page.click("#approve", timeout=PAGE_TIMEOUT_MS)
+        page.wait_for_selector("#enrolment-row:not([hidden])")
+
+        page.select_option("#enrolment", "picked")
+        page.click("#approve")
+
+        assert asking.finish() == RELEASED
+        assert page.evaluate(STORED_ENROLMENT) == [["keyguard.device", "picked"], ["keyguard.passkey", None]]
+    finally:
+        for credential_id in added:
+            browser.forget(credential_id)
+        page.evaluate(RESTORE_ENROLMENT, kept)
+
+
 def test_should_create_a_store_in_an_empty_folder(page, tmp_path):
     folder = tmp_path / "fresh"
     signing_key, public_key, token_file = requester_keys(folder)

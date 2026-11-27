@@ -54,17 +54,31 @@ let pendingRecipients = null
 let setupHost = null
 let setupHosts = []
 
+class EnrolmentUnchosen extends Error {}
+
+const pickedEnrolment = (meta) => ($('enrolment-row').hidden ? null : core.namedEnrolment(meta, $('enrolment').value))
+
+const offerEnrolments = (names) => {
+  $('enrolment').replaceChildren(...names.map((name) => new Option(name, name)))
+  $('enrolment-row').hidden = false
+  return new EnrolmentUnchosen('This browser has not approved before. Pick the enrolment whose passkey this device ' +
+    'holds, then approve again. Approvals here use it from then on.')
+}
+
 const unlockRemote = async (meta) => {
-  const chosen = core.approvalEnrolment(meta, transport.storedEnrolment())
+  const remembered = core.approvalEnrolment(meta, transport.storedEnrolment())
+  const chosen = remembered ?? pickedEnrolment(meta)
   if (!chosen) {
-    throw new Error(core.enrolmentNames(meta).length
-      ? 'this browser has no enrolment of its own yet. Add this device at /enroll first'
-      : 'nothing is enrolled yet. Enrol a passkey at /enroll first')
+    const names = core.enrolmentNames(meta)
+    if (names.length) throw offerEnrolments(names)
+    throw new Error('nothing is enrolled yet. Enrol a passkey at /enroll first')
   }
   const passkey = chosen.passkey ?? (chosen.handle ? await store.fetchText(chosen.handle) : null)
   setStatus(passkey ? 'Waiting for the passkey\u2026' : `Waiting for the passkey. If asked, pick the one for "${chosen.name}".`,
     'busy')
-  return core.unwrapRemote(await store.fetchFile(`identity-remote.${chosen.name}.age`), passkey)
+  const remote = await core.unwrapRemote(await store.fetchFile(`identity-remote.${chosen.name}.age`), passkey)
+  if (!remembered) transport.rememberEnrolment(chosen.name, null)
+  return remote
 }
 
 const openIndex = async (remote) => {
@@ -137,6 +151,7 @@ const retry = (text) => {
 const settleFailure = (error) => {
   if (error instanceof core.AbsentNames) return finish({ absent: error.names }, `${error.message}.`, 'err')
   if (isCancelled(error)) return retry(passkeyRefused(error))
+  if (error instanceof EnrolmentUnchosen) return retry(error.message)
   if (error instanceof core.RecipientsChanged) {
     pendingRecipients = error.recipients
     $('trust').hidden = false

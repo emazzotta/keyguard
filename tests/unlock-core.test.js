@@ -14,7 +14,7 @@ const failure = async (work) => {
 }
 const fakeStorage = () => {
   const items = new Map()
-  return { getItem: (key) => items.get(key) ?? null, setItem: (key, value) => items.set(key, value) }
+  return { getItem: (key) => items.get(key) ?? null, setItem: (key, value) => items.set(key, value), removeItem: (key) => items.delete(key) }
 }
 const fetchStoreFile = async (path) => core.b64decode(V.store[path])
 const remoteDecrypter = new age.Decrypter()
@@ -469,6 +469,26 @@ describe('enrolments', () => {
     core.rememberEnrolment('ipad', 'AGE-PLUGIN-FIDO2PRF-1TEST', storage)
 
     expect(core.storedEnrolment(storage)).toEqual({ name: 'ipad', passkey: 'AGE-PLUGIN-FIDO2PRF-1TEST' })
+  })
+
+  /** @useCase docs/service.md */
+  test('should remember a picked enrolment without a passkey, dropping the one stored before', () => {
+    const storage = fakeStorage()
+    core.rememberEnrolment('ipad', 'AGE-PLUGIN-FIDO2PRF-1TEST', storage)
+
+    core.rememberEnrolment('macbook', null, storage)
+
+    expect(core.storedEnrolment(storage)).toEqual({ name: 'macbook', passkey: null })
+  })
+
+  /** @useCase docs/service.md */
+  test.each([
+    ['with its published handle', 'iphone', { name: 'iphone', passkey: null, handle: 'identity-remote.iphone.passkey' }],
+    ['without a handle where none is published', 'macbook', { name: 'macbook', passkey: null, handle: null }],
+    ['nothing for a name the store does not hold', 'ipad', null],
+    ['nothing for the paper backup', 'paper', null],
+  ])('should name an enrolment the user picked %s', (_case, name, expected) => {
+    expect(core.namedEnrolment(handles, name)).toEqual(expected)
   })
 
   /** @useCase docs/service.md */
