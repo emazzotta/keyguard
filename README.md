@@ -2,7 +2,14 @@
 
 Secrets in an encrypted store that a passkey opens. One Python command and a browser: no server, no account, no extra binary. For Windows, macOS and Linux.
 
+<img src="docs/images/terminal.png" alt="A terminal: import secrets.env, list and exec, each waiting for one approval in the browser" width="720">
+
 A command asks for secrets by name. A page on `localhost` shows the names, you approve with Touch ID, Windows Hello, a phone or a security key, and the command gets the values. The files on disk stay encrypted the whole time.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/approve-dark.png">
+  <img src="docs/images/approve-light.png" alt="The approval page: the asking session, the two secret names and the Approve with passkey button" width="640">
+</picture>
 
 A machine without a browser, such as a dev box or a container, asks through the optional unlock service, and you approve on your phone ([Approve on Your Phone](#approve-on-your-phone)).
 
@@ -50,6 +57,11 @@ keyguard-passkey import secrets.env   # encrypt every NAME=value line
 keyguard-passkey list                 # check the names
 keyguard-passkey exec API_TOKEN -- ./deploy.sh
 ```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/init-dark.png">
+  <img src="docs/images/init-light.png" alt="The page that init opens: a paper passphrase twice, then Create the store" width="480">
+</picture>
 
 `import` reads one value back from the store before it reports success. It never deletes the plaintext file: delete it yourself once the store has what you need. A name that the store already holds keeps its value unless you pass `--force`. A `base64:` value, as `get` prints it, is stored decoded.
 
@@ -113,6 +125,20 @@ Released values stay in memory for 10 minutes, so the next command for the same 
 The config folder is `%APPDATA%\keyguard-passkey` on Windows and `$XDG_CONFIG_HOME/keyguard-passkey` elsewhere, with `~/.config/keyguard-passkey` as the fallback.
 
 ## How It Works
+
+```mermaid
+sequenceDiagram
+    participant C as Command
+    participant P as Page on localhost
+    participant A as Authenticator
+    C->>P: opens the page, one-time token
+    P->>C: reads the encrypted files
+    Note over P: shows the names
+    P->>A: WebAuthn PRF, on your approval
+    A-->>P: derived key
+    Note over P: unwraps the store's key, decrypts the asked files
+    P->>C: the values, over loopback
+```
 
 1. The command starts a server on `127.0.0.1` for this one request and opens `http://localhost:<port>` with a one-time token.
 2. The page reads the encrypted files from that server and shows what is asked.
