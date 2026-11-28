@@ -550,3 +550,7 @@ platforms. Everything else under test is the code that ships.
 - When the optional `?timeout=N` is used, decrypted values remain in the server process memory for the specified duration
 - All Docker containers on the machine have equal access to all secrets and bridge endpoints — there is no per-container scoping
 - The bridge command list lives in `~/.mac-bridge-endpoints.yaml`; protect the file with `chmod 600` so only your user can edit which commands the bridge will run
+
+## License
+
+[MIT](LICENSE).
