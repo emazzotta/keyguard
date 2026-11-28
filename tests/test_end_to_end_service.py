@@ -506,6 +506,28 @@ def test_should_keep_a_differing_pinned_key_until_its_line_is_ticked_to_replace_
     assert (kept, machines.pins()["mac"], machines.pins()["ai-navigator"]) == (old, new, other)
 
 
+def key_hint(key: str) -> str:
+    return f"{key[:8]}\u2026{key[-8:]}"
+
+
+HELD = "(rows) => rows.map((row) => [row.dataset.id, row.dataset.state, row.lastChild.textContent])"
+
+
+def test_should_list_what_this_browser_has_pinned_before_anything_is_pasted_and_after_a_pin(machines):
+    held, new = random_key(), random_key()
+    machines.holding_pins({"mac": held})
+    machines.page.goto(f"{machines.service.base}{ALL_MACHINES_LINK}")
+    before = machines.page.eval_on_selector_all("#held-rows li", HELD)
+
+    machines.page.fill("#pins", f"ai-navigator {new}")
+    machines.page.click("#pin")
+    machines.page.wait_for_selector('#held-rows li[data-id="ai-navigator"][data-state="pinned"]')
+
+    assert (before, machines.pins()["mac"]) == (
+        [["ai-navigator", "unpinned", "Not pinned"], [REQUESTER, "unpinned", "Not pinned"], ["mac", "pinned", key_hint(held)]],
+        held)
+
+
 @pytest.mark.parametrize("opened", ["link", "machine list"])
 def test_should_open_the_paste_box_empty_while_keys_are_pinned(machines, opened):
     machines.holding_pins({machine_id: random_key() for machine_id in MACHINE_IDS})

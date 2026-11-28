@@ -67,6 +67,20 @@ export const pastePinForm = (transport) => {
     showPinButton()
   }
 
+  // Shows what this browser holds and changes nothing: only a pasted line, ticked if it differs, replaces a pin.
+  const showHeld = () => {
+    $('held-rows').replaceChildren(...hosts.map((id) => {
+      const pinned = transport.pinned(id)
+      const shown = document.createElement('li')
+      shown.dataset.id = id
+      shown.dataset.state = pinned ? 'pinned' : 'unpinned'
+      shown.append(textElement('strong', `${transport.label(id)} (${id})`),
+        pinned ? textElement('code', keyHint(pinned)) : textElement('span', 'Not pinned'))
+      return shown
+    }))
+    $('held').hidden = hosts.length === 0
+  }
+
   const showBack = (next) => {
     $('back').hidden = !next
     if (next) $('back').href = next
@@ -95,6 +109,7 @@ export const pastePinForm = (transport) => {
       // Empty by design: keys from the service, the link or the pins held would let the service choose whom to trust.
       $('pins').value = ''
       replacing.clear()
+      showHeld()
       showPasted()
       showBack(null)
       setStatus('Paste one line for each machine. Nothing is pinned before you tap.')
@@ -111,6 +126,7 @@ export const pastePinForm = (transport) => {
       const keyless = next ? keylessAsker() : null
       if (next && unpinned === 0 && !keyless) return location.replace(next)
       replacing.clear()
+      showHeld()
       showPasted()
       setStatus(pinnedText(chosen, unpinned, keyless), 'ok')
       showBack(next)

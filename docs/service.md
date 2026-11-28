@@ -123,6 +123,7 @@ Another proxy needs the same behaviour, and `KEYGUARD_PASSKEY_IDENTITY_HEADER` s
    devbox <44-character base64 key>
    ```
 
+   - Above the box, "Pinned in this browser" lists every machine with the first and last 8 characters of its pinned key, or Not pinned, and follows each tap. It only shows: nothing there pins, replaces or removes a key.
    - The page lists each line with the machine's name and the first and last 8 characters of its key, and one tap pins every line it can.
    - It pins nothing for a line whose id no machine has, whose key is not 32 bytes in base64, that is not an id and a key, or whose id another line names too.
    - A machine with another key pinned keeps it until you tick Replace on its line. A line whose key is already pinned changes nothing.

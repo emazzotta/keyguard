@@ -30,6 +30,10 @@
     </div>
     <label for="pubkey" id="pubkey-label">Signing key (base64)</label>
     <input id="pubkey" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="44-character base64 key">
+    <div id="held" class="held" hidden>
+      <p class="held-title">Pinned in this browser</p>
+      <ul id="held-rows" class="pin-rows held-rows"></ul>
+    </div>
     <label for="pins" id="pins-label" hidden>Signing keys, one line a machine: its id, a space and its key</label>
     <textarea id="pins" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
               placeholder="devbox &lt;base64 key&gt;" hidden></textarea>

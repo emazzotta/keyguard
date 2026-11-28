@@ -278,6 +278,16 @@ input:focus, select:focus, textarea:focus {
 
 .pin-rows p { margin: 0; }
 
+.held { display: grid; gap: 6px; }
+
+.held-title { margin: 0; color: var(--muted); font-size: 14px; }
+
+.held-rows { margin: 0; }
+
+.held-rows li { grid-template-columns: 1fr auto; align-items: baseline; }
+
+.held-rows li[data-state="unpinned"] span { color: var(--muted); }
+
 .note {
   margin-top: 8px;
   padding: 14px 16px;

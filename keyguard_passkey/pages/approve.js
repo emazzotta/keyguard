@@ -234,6 +234,7 @@ const showPinTarget = (host) => {
   const label = transport.label(host)
   const pinned = transport.pinned(host)
   $('pin-rows').hidden = true
+  $('held').hidden = true
   $('pin').textContent = 'Pin this key'
   $('pin').disabled = false
   $('pubkey-label').textContent = `${capitalized(label)} signing key (base64)`
