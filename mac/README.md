@@ -1,22 +1,27 @@
-# keyguard
+# keyguard, the Mac Kit
 
 [![Mac](https://github.com/emazzotta/keyguard-passkey/actions/workflows/mac.yml/badge.svg)](https://github.com/emazzotta/keyguard-passkey/actions/workflows/mac.yml)
 
-A lightweight, local secret manager for macOS. Encrypts each secret on disk as its own [age](https://age-encryption.org) file and gates every decryption behind Touch ID. Exposes secrets over a local HTTP server so Docker containers or local scripts can fetch them at runtime without credentials ever being baked into images or environment variables.
+The macOS part of [keyguard-passkey](../README.md): a Swift command that keeps each secret as its own [age](https://age-encryption.org) file and asks Touch ID before every decryption, and a local HTTP server that lets Docker containers and scripts on the Mac read secrets at runtime and run commands you allow. Nothing is baked into an image or an environment variable.
 
-## How it works
+<img src="../docs/images/mac-read.png" alt="A container reads two secrets: Touch ID asks once, the second read comes from the cache, and the access log on the Mac shows both" width="720">
 
+## How It Works
+
+```mermaid
+sequenceDiagram
+    participant C as Container
+    participant S as keyguard-server, port 7777
+    participant K as keyguard
+    C->>S: GET /TOKEN,PASSWORD
+    S->>K: keyguard get TOKEN PASSWORD
+    Note over K: one Touch ID prompt,<br/>"Reveal TOKEN, PASSWORD"
+    K->>K: decrypts the index, then only the two files it names
+    K-->>S: TOKEN=value, PASSWORD=value
+    S-->>C: the values, and a line in the access log
 ```
-Docker container
-  └── curl http://host.docker.internal:7777/TOKEN,PASSWORD
-        └── keyguard-server (host, port 7777)
-              └── keyguard get TOKEN PASSWORD
-                    ├── Touch ID prompt: "Reveal TOKEN, PASSWORD"  (once, not once per key)
-                    ├── age-decrypt the index, then only the two files it names
-                    └── return TOKEN=value\nPASSWORD=value
-```
 
-Secrets never exist in plaintext on disk, and every read requires a fingerprint.
+Secrets never exist in plaintext on disk, and every read needs a fingerprint.
 
 ### The store
 
@@ -43,18 +48,15 @@ machine, and canonically inside `index.age` - and compared on every operation.
 They diverging is the one failure that would otherwise be silent and total, so
 it hard-fails rather than picking a winner.
 
-## Other systems: keyguard-passkey
+## With keyguard-passkey
 
-keyguard needs macOS and Touch ID. [keyguard-passkey](https://github.com/emazzotta/keyguard-passkey) is the portable client for Windows, macOS and Linux: one Python command and a browser, and a passkey (Windows Hello, Touch ID or a phone) approves each read. It writes the same store layout.
-
-That repository also holds the [provider contract](https://github.com/emazzotta/keyguard-passkey/blob/main/docs/provider.md): the commands, the output and the exit codes that a script can rely on when it asks keyguard, keyguard-passkey or another secret manager for a secret.
+The Mac kit works alone. [Using Them Together](../README.md#using-them-together) says what the portable client adds: a store at the unlock service that the Mac syncs, and approval on the phone when nobody is at the Mac. Both follow the [provider contract](../docs/provider.md), the commands, output and exit codes that a script can rely on.
 
 ## Requirements
 
 - macOS with Touch ID
 - [`age`](https://age-encryption.org) and `age-keygen` (`brew install age`)
-- PyYAML, for the bridge config: `python3 -m pip install pyyaml`. Without it the server starts but
-  the bridge stays disabled
+- PyYAML, for the bridge config: `python3 -m pip install pyyaml`. Without it the server starts, and the bridge stays off
 - Python 3 (pre-installed on macOS)
 - Xcode Command Line Tools (`xcode-select --install`)
 - [`uv`](https://docs.astral.sh/uv/), for the Python tests (`brew install uv`)
@@ -67,11 +69,13 @@ cd keyguard-passkey/mac
 make
 ```
 
-This compiles the Swift binary, installs everything to `/usr/local`, and registers a launchd agent that starts automatically at login.
+This compiles the Swift binary, installs everything to `/usr/local`, and registers a launchd agent that starts automatically at login. `make install` asks for `sudo`.
+
+For the [phone fallback](#phone-fallback), pass the client from a release: download `keyguard-passkey.pyz` from the [releases](https://github.com/emazzotta/keyguard-passkey/releases) and run `make KEYGUARD_PHONE_CLIENT_PYZ=path/to/keyguard-passkey.pyz`. Without it, reads stay Touch ID only.
 
 ## Managing secrets
 
-**Import from an existing `.env` file (additive — merges with existing secrets):**
+**Import from an existing `.env` file (additive: merges with existing secrets):**
 ```bash
 keyguard import path/to/.env           # prompts for each conflicting key
 keyguard import path/to/.env --force   # overwrites all conflicts without asking
@@ -155,7 +159,7 @@ curl http://host.docker.internal:7777/MY_API_TOKEN,PASSWORD  # KEY=value lines
 curl http://host.docker.internal:7777/_keys                  # list all key names
 ```
 
-Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. Each secret read appends a line to `~/.keyguard/access.log` with an ISO timestamp, the source IP with resolved names (reverse DNS hostname and/or Docker container name), and the keys read. No GUI notifications - tail the log to watch reads in real time. Clients can send an `X-Keyguard-Source` header (e.g., the container hostname) to identify themselves - the server resolves it to a container name via `docker inspect` when possible. A client acting for a Claude Code or opencode session also sends `X-Keyguard-Session` (the first 8 hex digits of a Claude Code session ID, or the last 8 characters of an opencode one) and `X-Keyguard-Title` (the session title, percent-encoded UTF-8). The Touch ID prompt then names that session, as in `Reveal GITLAB_TOKEN for "Fix CI" (48f92bcb), cached for 120s`, bridge prompts do too (`Run bridge endpoint mac-trash: ..., for "Fix CI" (48f92bcb)`, after the command, so a title cannot push it out of view), and the log line gains `session 48f92bcb`. Nothing verifies these values: they tell you which session to look at, not who asked.
+The picture at the top shows these calls with their answers. Every GET request triggers a Touch ID prompt on the host showing the exact key names being revealed. Each secret read appends a line to `~/.keyguard/access.log` with an ISO timestamp, the source IP with resolved names (reverse DNS hostname and/or Docker container name), and the keys read. No GUI notifications - tail the log to watch reads in real time. Clients can send an `X-Keyguard-Source` header (e.g., the container hostname) to identify themselves - the server resolves it to a container name via `docker inspect` when possible. A client acting for a Claude Code or opencode session also sends `X-Keyguard-Session` (the first 8 hex digits of a Claude Code session ID, or the last 8 characters of an opencode one) and `X-Keyguard-Title` (the session title, percent-encoded UTF-8). The Touch ID prompt then names that session, as in `Reveal GITLAB_TOKEN for "Fix CI" (48f92bcb), cached for 120s`, bridge prompts do too (`Run bridge endpoint mac-trash: ..., for "Fix CI" (48f92bcb)`, after the command, so a title cannot push it out of view), and the log line gains `session 48f92bcb`. Nothing verifies these values: they tell you which session to look at, not who asked.
 
 Optionally, append `?timeout=N` to cache decrypted values in the server's process memory for up to `N` seconds (max 300), reducing repeated Touch ID prompts. Cache entries are scoped to the requesting IP - a different container cannot read another's cache unless explicitly allowed with `?share=all` or `?share=172.17.0.2,172.17.0.3`. Cached reads still write a log line marked `(cached)`, and the Touch ID prompt shows the duration for informed consent (`"Reveal TOKEN, cached for 60s"`). By default there is no caching. Flush with `DELETE /_cache`. A successful `POST /<name>` evicts that secret from every requester's cache, so the next read returns the new value.
 
@@ -164,17 +168,37 @@ Optionally, append `?timeout=N` to cache decrypted values in the server's proces
 curl -s -X POST http://host.docker.internal:7777/MY_API_TOKEN -d 'the-value'
 ```
 
-`POST /<name>` stores or updates a secret. The value is read from the request body. Triggers Touch ID on the host (`"Update MY_API_TOKEN"`). Responds with `Set 'MY_API_TOKEN'` on success.
+`POST /<name>` stores or updates a secret. The value is read from the request body. Triggers Touch ID on the host (`"Save MY_API_TOKEN"`). Responds with `Set 'MY_API_TOKEN'` on success.
 
-The server only accepts connections from localhost and Docker's internal networks — other devices on the local network are rejected.
+The server only accepts connections from localhost and Docker's internal networks. Other devices on the local network are rejected.
 
 ### Phone fallback
 
-A read can also be approved on the phone, for when nobody is at the Mac. The Touch ID prompt shows at once. If nobody sits at a web terminal, the server also runs the [keyguard-passkey](https://github.com/emazzotta/keyguard-passkey) client as requester `mac` at once. If someone does, it waits 15 s for an answer to the prompt first ([Presence](#presence)). The client posts a signed request to the unlock service that holds the store (`KEYGUARD_STORE_URL`), and the web terminal and the phone's approve page can release it with a passkey. A client in tmux sends its pane in `X-Keyguard-Pane` (`%6`), which the server hands the client as `TMUX_PANE`, so the web terminal's sheet can show the shell or session that asks. The first answer wins: Touch ID's ends the client, which withdraws its request, and the phone's closes the Touch ID prompt. A Touch ID approval for a caller with a session then runs the client's `pending --clear-expired=SESSION` in the background, so that session's requests that expired unanswered leave the list, as after an answer on the phone, and the web terminal's red ring of the session goes. A read the server's cache answers clears nothing, and a client too old for the flag leaves the list as it was. Only your own Cancel at the Mac is a no and ends the read (`keyguard` exits 2). A prompt that ends any other way asks the phone at once: a locked screen ends it after about 27 s (exit 3), and no fingerprint sensor with the lid closed fails it at once (exit 1). An unanswered prompt on an unlocked screen never ends by itself, so the server ends it after 60 s and keeps waiting for the phone. A failing client leaves the Touch ID prompt up. A read waits up to 345 s.
+A read can also be approved on the phone, for when nobody is at the Mac. The Touch ID prompt shows at once. If nobody sits at a web terminal, the server also runs the [keyguard-passkey](../README.md) client as requester `mac` at once. If someone does, it waits 15 s for an answer to the prompt first ([Presence](#presence)). The client posts a signed request to the unlock service that holds the store (`KEYGUARD_STORE_URL`), and the web terminal and the phone's approve page can release it with a passkey. A client in tmux sends its pane in `X-Keyguard-Pane` (`%6`), which the server hands the client as `TMUX_PANE`, so the web terminal's sheet can show the shell or session that asks. The first answer wins: Touch ID's ends the client, which withdraws its request, and the phone's closes the Touch ID prompt. A Touch ID approval for a caller with a session then runs the client's `pending --clear-expired=SESSION` in the background, so that session's requests that expired unanswered leave the list, as after an answer on the phone, and the web terminal's red ring of the session goes. A read the server's cache answers clears nothing, and a client too old for the flag leaves the list as it was. Only your own Cancel at the Mac is a no and ends the read (`keyguard` exits 2). A prompt that ends any other way asks the phone at once: a locked screen ends it after about 27 s (exit 3), and no fingerprint sensor with the lid closed fails it at once (exit 1). An unanswered prompt on an unlocked screen never ends by itself, so the server ends it after 60 s and keeps waiting for the phone. A failing client leaves the Touch ID prompt up. A read waits up to 345 s.
+
+```mermaid
+sequenceDiagram
+    participant C as Container
+    participant S as keyguard-server
+    participant T as Touch ID
+    participant P as keyguard-passkey, requester mac
+    participant U as Unlock service
+    participant Ph as Phone
+    C->>S: GET /TOKEN
+    par at once
+        S->>T: keyguard get TOKEN
+    and at once, or after 15 s when someone sits at a web terminal
+        S->>P: keyguard-passkey get TOKEN
+        P->>U: signed request
+        Ph->>U: approve with the passkey
+    end
+    Note over S: the first answer wins and ends the other side
+    S-->>C: the value
+```
 
 It is off until `KEYGUARD_STORE_URL` is set and both files exist:
 
-- `make install` copies the client into `/usr/local/lib/keyguard/unlock/keyguard-passkey.pyz`, owned by root, from `$KEYGUARD_PHONE_CLIENT_PYZ` (default `~/Projects/private/personal-infra/apps/devbox/unlock/keyguard-passkey.pyz`, the copy the dev box runs). keyguard-passkey's `tools/vendor.py --pyz vX.Y.Z DIR` packs one from a release tag. The server never runs it from a checkout that a container can write. Beside it, `pending.py` runs the client's `pending`, which the web terminal uses to list and cancel the Mac's requests.
+- `make install` copies the client into `/usr/local/lib/keyguard/unlock/keyguard-passkey.pyz`, owned by root, from `$KEYGUARD_PHONE_CLIENT_PYZ` (default `~/Projects/private/personal-infra/apps/devbox/unlock/keyguard-passkey.pyz`, the owner's pinned copy). Take `keyguard-passkey.pyz` from a release, or pack one with [`tools/vendor.py`](../tools/vendor.py) `--pyz vX.Y.Z DIR`. The server never runs it from a checkout that a container can write. Beside it, `pending.py` runs the client's `pending`, which the web terminal uses to list and cancel the Mac's requests.
 - The Mac's Ed25519 signing key at `$KEYGUARD_PHONE_SIGNING_KEY` (default `~/.keyguard/mac-sign.key`, mode 0600). Back it up in keyguard as `MAC_SIGN`, and pin its public half once on each approving browser at `/approve?pin=mac`.
 
 The client needs Homebrew's `age` and `openssl@3` (LibreSSL lacks `pkeyutl -rawin`). The Mac must be signed in to Tailscale as the store's user, since the unlock service takes the Mac's tailnet identity in place of a request token.
@@ -192,7 +216,7 @@ Each web terminal instance writes a file in `~/.claude/presence/`, with one line
 - `computer` wins over `phone` when both are fresh. A line dated in the future is fresh. A bad line, a dot-named file and a file that vanishes while it is read count as no line.
 - Touch ID shows at once in every case. Presence only decides when the phone is asked too.
 - Until the Mac's web terminal writes the folder, every read is `unknown`, so every read asks the phone at once.
-- The same rules live in `keyguard_server/presence.py`, keyguard-passkey (`service/presence.py`) and the dotfiles (`bin/presence.py`): change all three together.
+- The same rules live in `src/keyguard_server/presence.py`, [`keyguard_passkey/service/presence.py`](../keyguard_passkey/service/presence.py) and the owner's dotfiles (`bin/presence.py`): change all three together.
 
 #### Failure reports
 
@@ -213,7 +237,7 @@ A failed secret read sends one line to Telegram. The unlock service posts `❌�
 
 ## Owner signatures
 
-A session asks for a message signed as the owner with `POST /_owner/sign`, as dotfiles `fleet send --as-owner` does. The server hands it to the keyguard-passkey client as requester `mac`, and you approve on the approve page: in the web terminal's Keyguard sheet with Touch ID, or on the phone. The page signs ([keyguard-passkey `docs/service.md`, Owner Signatures](https://github.com/emazzotta/keyguard-passkey/blob/main/docs/service.md#owner-signatures)); the server only passes the finished token on.
+A session asks for a message signed as the owner with `POST /_owner/sign`, as dotfiles `fleet send --as-owner` does. The server hands it to the keyguard-passkey client as requester `mac`, and you approve on the approve page: in the web terminal's Keyguard sheet with Touch ID, or on the phone. The page signs ([Owner Signatures](../docs/service.md#owner-signatures)); the server only passes the finished token on.
 
 ```bash
 curl -s -X POST http://host.docker.internal:7777/_owner/sign -H 'Content-Type: application/json' \
@@ -248,17 +272,13 @@ pem=$("$(brew --prefix openssl@3)/bin/openssl" genpkey -algorithm ed25519) &&
 
 ## Bridge endpoints
 
-The bridge lets you expose whitelisted Mac commands over HTTP. A Docker container can trigger a Spotify pause, send a system notification, or call any script you pre-approve — without SSH, without scripting on the host, and without exposing arbitrary command execution.
+The bridge lets you expose whitelisted Mac commands over HTTP. A Docker container can trigger a Spotify pause, send a system notification, or call any script you pre-approve, without SSH, without scripting on the host, and without exposing arbitrary command execution.
+
+<img src="../docs/images/mac-bridge.png" alt="A container lists the bridge endpoints, sees the private ones after Touch ID, runs one with input that the prompt quotes, and calls a public one without a prompt" width="720">
 
 ### Setup
 
-Install PyYAML (one-time):
-
-```bash
-pip3 install pyyaml
-```
-
-Copy the example config to your home directory and customise it:
+With PyYAML installed ([Requirements](#requirements)), copy the example config to your home directory and customise it:
 
 ```bash
 cp .mac-bridge-endpoints.yaml.example ~/.mac-bridge-endpoints.yaml
@@ -266,7 +286,7 @@ chmod 600 ~/.mac-bridge-endpoints.yaml
 $EDITOR ~/.mac-bridge-endpoints.yaml
 ```
 
-The file is gitignored — it never enters the repo. To use a different path, set `KEYGUARD_BRIDGE_CONFIG_FILE` in your shell profile **before** running `make install` — the value is baked into the launchd plist (same pattern as `KEYGUARD_SECRETS_FILE`):
+The file is gitignored: it never enters the repo. To use a different path, set `KEYGUARD_BRIDGE_CONFIG_FILE` in your shell profile **before** running `make install`: the value is baked into the launchd plist (same pattern as `KEYGUARD_SECRETS_FILE`):
 
 ```bash
 export KEYGUARD_BRIDGE_CONFIG_FILE=~/Dropbox/keyguard/bridge.yaml
@@ -285,20 +305,18 @@ Run bridge endpoint spotify-play: osascript -e 'tell application "Spotify" to pl
 List all bridge endpoints, private ones included
 ```
 
-```plantuml
-@startuml
-!pragma layout smetana
-participant "container" as caller
-participant "keyguard-server" as server
-participant "keyguard confirm" as cli
-caller -> server : POST /_bridge/mac-trash\nbody "/Users/me/Desktop/a.png"
-server -> server : refuse a browser (403),\nan unknown name (404), a wrong method (405)
-server -> cli : stdin "Run bridge endpoint mac-trash: ..., with input ..."
-cli -> cli : Touch ID dialog shows that reason
-cli --> server : exit 0 approved, 2 denied
-server -> server : run the endpoint it just described
-server --> caller : 200 with stdout, or 403 when denied
-@enduml
+```mermaid
+sequenceDiagram
+    participant C as Container
+    participant S as keyguard-server
+    participant K as keyguard confirm
+    C->>S: POST /_bridge/mac-trash, body "/Users/me/Desktop/a.png"
+    S->>S: refuses a browser (403), an unknown name (404), a wrong method (405)
+    S->>K: stdin "Run bridge endpoint mac-trash: ..., with input ..."
+    K->>K: the Touch ID dialog shows that reason
+    K-->>S: exit 0 approved, 2 denied
+    S->>S: runs the endpoint it just described
+    S-->>C: 200 with stdout, or 403 when denied
 ```
 
 - The server writes every reason from the endpoint it is about to run, so a caller picks
@@ -357,15 +375,15 @@ endpoints:
 ```
 
 **Command rules:**
-- Must be a YAML list — no shell string, no glob expansion, no interpolation.
+- Must be a YAML list: no shell string, no glob expansion, no interpolation.
 - The executable path must be absolute, or resolvable via the server's `$PATH`.
-- No user-controlled values are ever passed into command arguments — the only caller input that reaches the command is the POST body via `stdin: true`.
+- No user-controlled values are ever passed into command arguments. The only caller input that reaches the command is the POST body via `stdin: true`.
 
 **The `public` flag (no prompt - the exception, never the default):**
 
 By default every call asks Touch ID. Adding `public: true` to a single endpoint skips that prompt **for that endpoint only**, leaving the IP allowlist and the browser check as the gates. Use it sparingly:
 
-- Suitable for: side-effect-light, non-secret-returning commands you'd be comfortable with anything on the local Docker network triggering — a status ping, a non-confidential notification, a "play/pause" toggle.
+- Suitable for: side-effect-light, non-secret-returning commands you'd be comfortable with anything on the local Docker network triggering: a status ping, a non-confidential notification, a "play/pause" toggle.
 - Unsuitable for: anything that mutates persistent state, reveals secrets, runs external network calls, or that you'd be unhappy seeing called by a compromised container on the same machine.
 - Strict parsing: only the literal YAML boolean `true` opens the gate. `public: "true"` (quoted), `public: 1`, `public: yes-but-no` all stay private, with a warning logged. Default and missing values are private.
 - Method whitelist, stdin handling, timeout, and access logging all still apply to public endpoints - `public: true` only removes the prompt.
@@ -417,7 +435,7 @@ Every successful bridge call appends a line to `~/.keyguard/access.log` with the
 | Accidental opt-in to public | Strict parser: only the literal YAML boolean `true` opens the gate. `public: "true"`, `public: 1`, `public: maybe` all stay private, with a warning logged |
 | Calls from another device | Only localhost and Docker internal subnets are accepted (same as keyguard secrets) |
 | Touch ID prompt from public endpoint calls | Public endpoints never invoke keyguard - a million calls to a public endpoint cannot fire a single prompt |
-| Command injection via request body | Body can only reach `stdin` — never command args. Commands are fixed lists, no shell involved |
+| Command injection via request body | Body can only reach `stdin`, not command args. Commands are fixed lists, no shell involved |
 | Arbitrary command execution | Only commands declared in the gitignored config file run; no dynamic dispatch |
 | Endpoint enumeration | Without `?all=1` the list holds only `public: true` endpoints; the full list costs a prompt. It never reveals the underlying command |
 | Config file leaks to git | `.mac-bridge-endpoints.yaml` is in `.gitignore` |
@@ -433,7 +451,7 @@ export KEYGUARD_STORE=~/Dropbox/keyguard/keyguard-store
 export KEYGUARD_RECIPIENTS_FILE=~/.keyguard/recipients   # keep this one local, never synced
 ```
 
-Set this in your shell profile before running `make install` — the value is baked into the launchd plist automatically so the server always uses the correct path.
+`make install` bakes only `KEYGUARD_SECRETS_FILE` into the launchd plist, so the server finds a store that sits beside it. A `KEYGUARD_STORE` or `KEYGUARD_RECIPIENTS_FILE` from your shell profile does not reach the server: add it under the plist's `EnvironmentVariables` by hand, as for `KEYGUARD_PRESENCE_DIR`.
 
 ## Store service (remote sync)
 
@@ -444,6 +462,13 @@ export KEYGUARD_STORE_URL=https://unlock.example.ts.net
 ```
 
 The service only ever holds ciphertext: the same `index.age` and `vars/*.age` files, never `meta.json` and never a key, so it can sync secrets it cannot read. keyguard still decrypts locally behind Touch ID.
+
+```mermaid
+flowchart LR
+    K["keyguard on the Mac<br/>local store as cache"] -- "push on write" --> U[("unlock service<br/>encrypted files only")]
+    U -- "pull on read" --> K
+    U -- "encrypted files" --> P["approve page on the phone<br/>decrypts with the passkey"]
+```
 
 - **Reads** (`get`, `list`, `export`) pull first. One request compares versions; only a store that moved fetches the files that changed. An unreachable service falls back to the local cache.
 - **Writes** (`set`, `delete`, `mv`, `import`) push after the local write, under the version the cache was based on, so a store changed elsewhere becomes a conflict to re-run rather than a lost update. Offline, a write refuses instead of letting the cache drift ahead of the service.
@@ -511,7 +536,7 @@ platforms. Everything else under test is the code that ships.
 | `make install` | Install binary, server, and launchd agent |
 | `make test` | Run all tests (Swift + CLI + Python) |
 | `make test-swift` | Run Swift unit tests only |
-| `make test-cli` | Drive the whole CLI end to end (Linux only, see below) |
+| `make test-cli` | Drive the whole CLI end to end (Linux only, see [Testing the CLI off macOS](#testing-the-cli-off-macos)) |
 | `make test-python` | Run Python server tests only (needs `uv`) |
 | `make start` | Start the server |
 | `make stop` | Stop the server |
@@ -525,32 +550,31 @@ platforms. Everything else under test is the code that ships.
 | Threat | Protection |
 |---|---|
 | Docker container reads secrets directly | Containers have no access to the host Keychain or filesystem |
-| Process on host reads the store | age-encrypted per file — unreadable without the identity |
-| Process on host reads the identity | macOS Keychain ACL — other apps are challenged with a system password prompt |
+| Process on host reads the store | age-encrypted per file: unreadable without the identity |
+| Process on host reads the identity | macOS Keychain ACL: other apps are challenged with a system password prompt |
 | Unauthenticated HTTP request | Touch ID required for every decryption; biometrics only (no password fallback) |
 | Optional cached read without Touch ID | Opt-in per-request (`?timeout=N`), capped at 300s, in-memory only, every read still appends to the access log |
 | Request from another device on the network | Server rejects all IPs outside localhost and Docker subnets |
-| Inline `keyguard set KEY value` | Warning printed to stderr — use the interactive prompt instead |
-| `POST /<name>` from container | Value piped to `keyguard` via stdin — never appears in process args or `ps` |
+| Inline `keyguard set KEY value` | Warning printed to stderr: use the interactive prompt instead |
+| `POST /<name>` from container | Value piped to `keyguard` via stdin: never appears in process args or `ps` |
 | Exported identity leaked | Touch ID required to export; not available over HTTP; stderr warning reminds user to store safely |
 | A session reads or replaces the owner signing key | `KEYGUARD_OWNER_SIGNING_KEY` is refused by `GET`, `POST`, `get`, `mv` and left out of `export`; only the approve page decrypts it, to sign one message you approved |
 
 ### Encryption details
 
 - **Algorithm**: age (X25519 + ChaCha20-Poly1305), via the `age` binary rather than a reimplementation of the format
-- **Key**: 256-bit, randomly generated, stored in macOS Keychain
-- **Nonce**: 96-bit random nonce, freshly generated on every write
-- **On-disk format**: `nonce (12 bytes) || ciphertext || auth tag (16 bytes)`
-- **Auth tag**: any tampering with the file is detected on decryption
+- **Key**: an age X25519 identity from `age-keygen`, held in the macOS Keychain (service `keyguard`, account `age-identity`)
+- **On-disk format**: one age file per secret, holding its name and its value padded to a 256-byte boundary
+- **Integrity**: age authenticates each file, so a changed file fails to decrypt; `meta.json` holds a SHA-256 per file for `keyguard verify`
 
 ### Known limitations
 
 - The encryption key in Keychain can be extracted with the macOS login password (no Touch ID required for that path)
 - Decrypted values are held in memory briefly and not explicitly zeroed
 - When the optional `?timeout=N` is used, decrypted values remain in the server process memory for the specified duration
-- All Docker containers on the machine have equal access to all secrets and bridge endpoints — there is no per-container scoping
+- All Docker containers on the machine have equal access to all secrets and bridge endpoints: there is no per-container scoping
 - The bridge command list lives in `~/.mac-bridge-endpoints.yaml`; protect the file with `chmod 600` so only your user can edit which commands the bridge will run
 
 ## License
 
-[MIT](LICENSE).
+[MIT](../LICENSE).
