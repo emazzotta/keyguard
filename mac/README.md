@@ -71,7 +71,7 @@ make
 
 This compiles the Swift binary, installs everything to `/usr/local`, and registers a launchd agent that starts automatically at login. `make install` asks for `sudo`.
 
-For the [phone fallback](#phone-fallback), pass the client from a release: download `keyguard-passkey.pyz` from the [releases](https://github.com/emazzotta/keyguard-passkey/releases) and run `make KEYGUARD_PHONE_CLIENT_PYZ=path/to/keyguard-passkey.pyz`. Without it, reads stay Touch ID only.
+For the [phone fallback](#phone-fallback), `make install` also packs the client of this checkout's release (`make client`), byte for byte the `keyguard-passkey.pyz` of that [release](https://github.com/emazzotta/keyguard-passkey/releases). It needs the release tag, which `git fetch --tags` brings. To install another file, run `make KEYGUARD_PHONE_CLIENT_PYZ=path/to/keyguard-passkey.pyz`.
 
 ## Managing secrets
 
@@ -200,7 +200,7 @@ sequenceDiagram
 
 It is off until `KEYGUARD_STORE_URL` is set and both files exist:
 
-- `make install` copies the client into `/usr/local/lib/keyguard/unlock/keyguard-passkey.pyz`, owned by root, from `$KEYGUARD_PHONE_CLIENT_PYZ` (default `~/Projects/private/personal-infra/apps/devbox/unlock/keyguard-passkey.pyz`, the owner's pinned copy). Take `keyguard-passkey.pyz` from a release, or pack one with [`tools/vendor.py`](../tools/vendor.py) `--pyz vX.Y.Z DIR`. The server never runs it from a checkout that a container can write. Beside it, `pending.py` runs the client's `pending`, which the web terminal uses to list and cancel the Mac's requests.
+- `make install` copies the client into `/usr/local/lib/keyguard/unlock/keyguard-passkey.pyz`, owned by root, from `$KEYGUARD_PHONE_CLIENT_PYZ`, by default the client that `make client` packs from this checkout's release tag with [`tools/vendor.py`](../tools/vendor.py). The server never runs it from a checkout that a container can write. Beside it, `pending.py` runs the client's `pending`, which the web terminal uses to list and cancel the Mac's requests.
 - The Mac's Ed25519 signing key at `$KEYGUARD_PHONE_SIGNING_KEY` (default `~/.keyguard/mac-sign.key`, mode 0600). Back it up in keyguard as `MAC_SIGN`, and pin its public half once on each approving browser at `/approve?pin=mac`.
 
 The client needs Homebrew's `age` and `openssl@3` (LibreSSL lacks `pkeyutl -rawin`). The Mac must be signed in to Tailscale as the store's user, since the unlock service takes the Mac's tailnet identity in place of a request token.
@@ -453,7 +453,7 @@ export KEYGUARD_STORE=~/Dropbox/keyguard/keyguard-store
 export KEYGUARD_RECIPIENTS_FILE=~/.keyguard/recipients   # keep this one local, never synced
 ```
 
-`make install` bakes only `KEYGUARD_SECRETS_FILE` into the launchd plist, so the server finds a store that sits beside it. A `KEYGUARD_STORE` or `KEYGUARD_RECIPIENTS_FILE` from your shell profile does not reach the server: add it under the plist's `EnvironmentVariables` by hand, as for `KEYGUARD_PRESENCE_DIR`.
+`make install` bakes `KEYGUARD_SECRETS_FILE`, `KEYGUARD_STORE` and `KEYGUARD_RECIPIENTS_FILE` from your shell into the launchd plist, so the server opens the same store as the `keyguard` command. Set them in your shell profile before `make install`, and run it again after you change one.
 
 ## Store service (remote sync)
 
