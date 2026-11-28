@@ -381,7 +381,8 @@ WEIRD" "$("$keyguard" list)"
     assert_equals "should record version 2 in the pinned recipient set" "2" \
         "$(python3 -c "import json; print(json.load(open('$KEYGUARD_RECIPIENTS_FILE'))['version'])")"
     local varfile
-    varfile="$(find "$work/drive/keyguard-store/vars" -name '*.age' | head -1)"
+    # Skip the placeholder files that the sync tests commit as another device: they hold no age file.
+    varfile="$(find "$work/drive/keyguard-store/vars" -name '*.age' ! -name 'bbbbbbbb*' ! -name 'cccccccc*' | head -1)"
     assert_equals "should let the new recipient decrypt a re-sealed var" "0" \
         "$(age -d -i "$work/recip2.key" "$varfile" >/dev/null 2>&1; echo $?)"
     assert_equals "should refuse to add a recipient already present" "1" \
