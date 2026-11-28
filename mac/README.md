@@ -1,6 +1,6 @@
 # keyguard
 
-[![Pipeline](https://github.com/emazzotta/keyguard/actions/workflows/pipeline.yml/badge.svg)](https://github.com/emazzotta/keyguard/actions/workflows/pipeline.yml)
+[![Mac](https://github.com/emazzotta/keyguard-passkey/actions/workflows/mac.yml/badge.svg)](https://github.com/emazzotta/keyguard-passkey/actions/workflows/mac.yml)
 
 A lightweight, local secret manager for macOS. Encrypts each secret on disk as its own [age](https://age-encryption.org) file and gates every decryption behind Touch ID. Exposes secrets over a local HTTP server so Docker containers or local scripts can fetch them at runtime without credentials ever being baked into images or environment variables.
 
@@ -62,8 +62,8 @@ That repository also holds the [provider contract](https://github.com/emazzotta/
 ## Installation
 
 ```bash
-git clone https://github.com/emazzotta/keyguard.git
-cd keyguard
+git clone https://github.com/emazzotta/keyguard-passkey.git
+cd keyguard-passkey/mac
 make
 ```
 

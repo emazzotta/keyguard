@@ -211,7 +211,7 @@ python3 tools/build_typage.py --check    # needs the bun release that tools/typa
 
 ## Related
 
-[keyguard](https://github.com/emazzotta/keyguard) is the macOS tool that this client comes from: a Swift command with Touch ID and an HTTP API for containers. `keyguard-passkey` writes the same store layout, and its [provider contract](docs/provider.md) comes from keyguard's commands and exit codes. One store that both tools open is not tested yet.
+[mac/](mac/README.md) holds keyguard, the macOS tool that this client comes from: a Swift command with Touch ID and an HTTP API for containers. Both write the same store layout, and the [provider contract](docs/provider.md) comes from keyguard's commands and exit codes. keyguard syncs its store with the unlock service, and its CLI test runs that sync against the service in this repository. One local store that both tools open is not tested yet.
 
 ## License
 
