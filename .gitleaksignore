@@ -1,1 +1,9 @@
 455e97275d372ae92e6a8c7a37f023c201d27640:tests/transport-service.test.js:generic-api-key:13
+# keyguard's test fixtures, from before mac/ (checked 2026-11-28): a fake owner token, a test string with base64
+# padding, and an age-keygen sample for the parser that is not the store's recipient
+150e2df2bcc5a30b6cfbf703b411693c3e325cda:Tests/test_owner_sign.py:generic-api-key:16
+5aa70f50ad6d095275479404334fba3e3d7041c7:Tests/KeyguardCoreTests/AgeCommandTests.swift:generic-api-key:45
+5aa70f50ad6d095275479404334fba3e3d7041c7:Tests/KeyguardCoreTests/AgeCommandTests.swift:age-secret-key:46
+fafdfb52c3f878f1dbd204d36978e1db00645d70:Tests/KeyguardCoreTests/LogicTests.swift:generic-api-key:54
+fafdfb52c3f878f1dbd204d36978e1db00645d70:Tests/KeyguardCoreTests/LogicTests.swift:generic-api-key:55
+7a79ba569f12a4e44bfe0aa04d78de4c5b70389c:Tests/KeyguardCoreTests/LogicTests.swift:generic-api-key:35
