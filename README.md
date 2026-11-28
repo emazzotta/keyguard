@@ -13,6 +13,8 @@ A command asks for secrets by name. A page on `localhost` shows the names, you a
 
 A machine without a browser, such as a dev box or a container, asks through the optional unlock service, and you approve on your phone ([Approve on Your Phone](#approve-on-your-phone)).
 
+This repository has a second deliverable, the [Mac Kit](#mac-kit): a Touch ID secret manager with an HTTP server for Docker containers on a Mac. Each works alone, and [Using Them Together](#using-them-together) says what joining them adds.
+
 ## Requirements
 
 - Python 3.9 or later. The client uses the standard library only.
@@ -209,9 +211,45 @@ python3 tools/build_typage.py --check    # needs the bun release that tools/typa
 
 `tools/typage/bun.lock` pins every package with its checksum. The pipeline runs the same check on every change, and a new bundle is a commit that `python3 tools/build_typage.py` makes.
 
-## Related
+## Mac Kit
 
-[mac/](mac/README.md) holds keyguard, the macOS tool that this client comes from: a Swift command with Touch ID and an HTTP API for containers. Both write the same store layout, and the [provider contract](docs/provider.md) comes from keyguard's commands and exit codes. keyguard syncs its store with the unlock service, and its CLI test runs that sync against the service in this repository. One local store that both tools open is not tested yet.
+[mac/](mac/README.md) holds keyguard, the macOS tool that this client comes from. It needs a Mac with Touch ID and installs with `make` from `mac/`.
+
+- `keyguard`, a Swift command: one age file per secret, the age key in the Keychain, and a Touch ID prompt that names what each command reveals.
+- `keyguard-server`, a launchd agent on port 7777: containers on the Mac read secrets with `curl http://host.docker.internal:7777/NAME`, and each read raises a Touch ID prompt that names the secrets and, when the client sends it, the asking session.
+- The bridge: commands that you list in a YAML file, which a container may run after a Touch ID prompt that names the command and its input.
+
+<img src="docs/images/mac-bridge.png" alt="A container lists the bridge endpoints, sees the private ones after Touch ID, runs one with input that the prompt quotes, and calls a public one without a prompt" width="720">
+
+## Using Them Together
+
+```mermaid
+flowchart LR
+    subgraph Mac
+        C[Containers] -- "HTTP, port 7777" --> S[keyguard-server]
+        S --> K["keyguard<br/>Touch ID"]
+        S -- "requester mac" --> M[keyguard-passkey client]
+    end
+    D["Dev box<br/>keyguard-passkey"] -- "signed request" --> U[("Unlock service<br/>encrypted store")]
+    M -- "signed request" --> U
+    K -- "sync, encrypted files only" --> U
+    Ph["Phone<br/>approve page, passkey"] <--> U
+```
+
+| You use | You get | You need |
+|---|---|---|
+| keyguard-passkey alone | A local store that a passkey opens, on Windows, macOS or Linux; with the unlock service, approval on the phone for machines without a browser | Python 3.9 and a browser with a passkey |
+| The Mac kit alone | A local store behind Touch ID, with the HTTP server and the bridge for containers on the Mac | A Mac with Touch ID, `age` and the Xcode Command Line Tools |
+| Both | The Mac's store synced with the unlock service, and each container read on the Mac approved by Touch ID or on the phone, whichever answers first | The unlock service, the client `.pyz` from a release installed into the Mac kit, and the Mac's signing key pinned on the phone |
+
+Joined, the two share one store at the unlock service:
+
+- **Sync.** With `KEYGUARD_STORE_URL` set to the service, `keyguard` treats its local store as a cache: reads pull what changed, writes push the changed files. The service holds encrypted files only ([Store service](mac/README.md#store-service-remote-sync)).
+- **The phone as a second approver.** `make install` puts the client from `KEYGUARD_PHONE_CLIENT_PYZ` beside the server. A container read then asks Touch ID and, through the client as requester `mac`, the phone; the first answer wins ([Phone fallback](mac/README.md#phone-fallback)).
+- **Owner signatures.** `POST /_owner/sign` on the Mac goes through the same client to the approve page, which signs ([Owner Signatures](docs/service.md#owner-signatures)).
+- **Keys.** The Mac decrypts with its age key in the Keychain, the phone with the store key that its passkey unwraps, so both keys must be recipients of the store. The phone pins the store's recipients and refuses a set that changed.
+
+Tested: the Mac kit's CLI test runs the sync against the unlock service of this repository. Not tested: the first setup of one store for both keys, and one local store that both commands open on the same machine.
 
 ## License
 
