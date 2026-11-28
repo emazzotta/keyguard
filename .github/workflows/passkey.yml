@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --locked
       - run: uv run --locked ruff check
       - run: uv run --locked mypy
@@ -33,7 +33,7 @@ jobs:
         python-version: ["3.9", "3.15"]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: ${{ matrix.python-version }}
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends age
@@ -46,7 +46,7 @@ jobs:
       KEYGUARD_PASSKEY_E2E: required
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends age
       - run: uv run --locked --with playwright==1.63.0 playwright install --with-deps chromium-headless-shell
       - run: uv run --locked --with playwright==1.63.0 pytest tests/test_end_to_end.py tests/test_end_to_end_service.py -v
