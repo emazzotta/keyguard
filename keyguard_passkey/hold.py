@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-DEFAULT_HOLD_SECONDS: Final = 600
-MAX_HOLD_SECONDS: Final = 600
+DEFAULT_HOLD_SECONDS: Final = 120
+MAX_HOLD_SECONDS: Final = 300
 ADDRESS_FILE: Final = "hold.json"
 BIND_ADDRESS: Final = "127.0.0.1"
 TOKEN_BYTES: Final = 32

@@ -57,7 +57,7 @@ def test_should_drop_a_value_once_its_time_is_over():
 
 
 @pytest.mark.spec("README.md")
-def test_should_never_hold_longer_than_ten_minutes():
+def test_should_never_hold_longer_than_five_minutes():
     clock = Clock()
     held = Held(now=clock)
     held.put("store", {"A": "one"}, 24 * 60 * 60)

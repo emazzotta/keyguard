@@ -16,7 +16,7 @@ Fixes go into the newest release. Older releases get none.
 
 - **A copied or stolen disk, and a backup.** Every secret is an age file, and so is the index of names. A file name is a salted hash, so it does not show which secret it holds.
 - **Each read.** A command gets values only after an approval with the passkey, on a page that shows the names and, when the caller gives one, the session that asks.
-- **Other commands.** `exec` gives the values to one command. Released values stay in the memory of a process of the same user for 10 minutes at most, and `lock` drops them.
+- **Other commands.** `exec` gives the values to one command. Released values stay in the memory of a process of the same user for 5 minutes at most, and `lock` drops them.
 
 ## What It Does Not Protect
 
