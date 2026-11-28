@@ -54,7 +54,7 @@ def test_with_timeout_caps_at_max(server):
         http_get(server, "/MY_TOKEN?timeout=9999")
 
     mock_run.assert_any_call(
-        ["/usr/local/bin/keyguard", "get", "MY_TOKEN", "--cache-duration", "300"],
+        ["/usr/local/bin/keyguard", "get", "MY_TOKEN", "--cache-duration", "600"],
         capture_output=True, text=True, errors="replace", timeout=60, input=None,
     )
 

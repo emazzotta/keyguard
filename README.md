@@ -107,7 +107,7 @@ Each command that reads or changes the store opens one browser tab and needs one
 
 ### The Hold
 
-Released values stay in memory for 2 minutes, so the next command for the same names needs no approval. A small process of your user keeps them, writes them nowhere, and exits when it holds nothing. `set`, `rm` and `import` drop the held value of each name they change, and `lock` drops all of them.
+Released values stay in memory for 5 minutes, so the next command for the same names needs no approval. A small process of your user keeps them, writes them nowhere, and exits when it holds nothing. `set`, `rm` and `import` drop the held value of each name they change, and `lock` drops all of them.
 
 ### Other Secret Managers
 
@@ -118,7 +118,7 @@ Released values stay in memory for 2 minutes, so the next command for the same n
 | Variable | Meaning | Default |
 |---|---|---|
 | `KEYGUARD_PASSKEY_STORE` | Store folder | `store` in the config folder |
-| `KEYGUARD_PASSKEY_HOLD_SECONDS` | Hold time, at most 300; 0 holds nothing | 120 |
+| `KEYGUARD_PASSKEY_HOLD_SECONDS` | Hold time, at most 600; 0 holds nothing | 300 |
 | `KEYGUARD_PASSKEY_STATE_DIR` | Folder for the hold's address file | the config folder |
 | `KEYGUARD_SESSION`, `KEYGUARD_TITLE` | The asking session, shown on the page | none |
 | `KEYGUARD_CONTAINER` | The host label of the asking container, shown in the service's Telegram notices | none |

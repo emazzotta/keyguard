@@ -408,8 +408,8 @@ def test_should_drop_every_held_value_on_lock(make_app):
 
 
 @pytest.mark.spec("README.md")
-@pytest.mark.parametrize("setting,seconds", [(None, 120), ("0", 0), ("200", 200), ("99999", 300), ("-5", 0)])
-def test_should_read_the_hold_time_and_cap_it_at_five_minutes(setting, seconds):
+@pytest.mark.parametrize("setting,seconds", [(None, 300), ("0", 0), ("450", 450), ("99999", 600), ("-5", 0)])
+def test_should_read_the_hold_time_and_cap_it_at_ten_minutes(setting, seconds):
     environ = {} if setting is None else {"KEYGUARD_PASSKEY_HOLD_SECONDS": setting}
 
     assert cli.hold_seconds(environ) == seconds
