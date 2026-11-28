@@ -1,6 +1,3 @@
 bin/
 .build/
-__pycache__/
-*.pyc
 .mac-bridge-endpoints.yaml
-.venv/

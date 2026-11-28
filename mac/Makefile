@@ -34,7 +34,6 @@ help: ## Show available targets
 	@echo "    keyguard clear                 # wipe all secrets and encryption key"
 	@echo "    keyguard import path/to/.env   # merge from plaintext (additive, then delete source)"
 	@echo "    keyguard set MY_API_TOKEN      # set a value (prompts for input)"
-	@echo "    keyguard set MY_API_TOKEN val  # set a value inline"
 	@echo "    keyguard delete MY_API_TOKEN   # remove a key (requires Touch ID)"
 	@echo "    keyguard mv OLD NEW            # rename a key (requires Touch ID)"
 	@echo "    keyguard list                  # list key names (requires Touch ID)"
