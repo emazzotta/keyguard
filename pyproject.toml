@@ -1,0 +1,54 @@
+[project]
+name = "keyguard-passkey"
+dynamic = ["version"]
+description = "Secrets in an age store that a passkey opens, through a page on localhost"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT AND BSD-3-Clause"
+license-files = ["LICENSE", "keyguard_passkey/pages/typage.LICENSES.txt"]
+authors = [{ name = "Emanuele Mazzotta" }]
+keywords = ["secrets", "passkey", "webauthn", "age", "dotenv"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/emazzotta/keyguard-passkey"
+Issues = "https://github.com/emazzotta/keyguard-passkey/issues"
+
+[project.scripts]
+keyguard-passkey = "keyguard_passkey.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "keyguard_passkey/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["keyguard_passkey"]
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+files = ["keyguard_passkey", "spike", "tools"]

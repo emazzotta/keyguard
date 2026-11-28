@@ -1,0 +1,21 @@
+#!/bin/sh
+""":"
+# Run this file with the machine's Python 3: python3 first, but python first on Windows,
+# where python3 is often the Microsoft Store stub. Python reads these lines as the docstring.
+case "$OS" in Windows_NT) candidates="python python3" ;; *) candidates="python3 python" ;; esac
+for candidate in $candidates; do
+    command -v "$candidate" >/dev/null 2>&1 && exec "$candidate" "$0" "$@"
+done
+echo "${0##*/}: needs Python 3 on PATH as python3 or python" >&2
+exit 127
+":"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from keyguard_passkey.cli import main  # noqa: E402
+
+raise SystemExit(main())

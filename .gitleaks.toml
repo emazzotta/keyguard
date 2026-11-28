@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "The page's test vectors carry a throwaway age identity of a store that holds test values only"
+paths = ['''^tests/unlock-core-vectors\.json$''']

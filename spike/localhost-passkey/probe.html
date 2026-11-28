@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyguard Passkey Probe</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 36rem; margin: 2rem auto; padding: 0 1rem; }
+  input { font: inherit; width: 100%; box-sizing: border-box; padding: 0.4rem; }
+  ol { padding-left: 1.2rem; }
+  li { margin: 0.8rem 0; }
+  button { font: inherit; padding: 0.4rem 0.8rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  pre { overflow-x: auto; font-size: 0.85rem; }
+  .ok { color: #1a7f37; }
+  .err { color: #cf222e; }
+  @media (prefers-color-scheme: dark) {
+    .ok { color: #3fb950; }
+    .err { color: #f85149; }
+  }
+</style>
+</head>
+<body>
+<h1>Keyguard Passkey Probe</h1>
+<p>Checks whether this browser can wrap and unwrap an age file with a passkey bound to <code>localhost</code>.
+Each step asks the authenticator once.</p>
+<label for="label">Authenticator you use for this run</label>
+<input id="label" placeholder="Touch ID, Windows Hello, iPhone through the QR code, ...">
+<ol>
+  <li><button id="create" type="button">Create a passkey</button> <span id="create-status"></span></li>
+  <li><button id="wrap" type="button" disabled>Wrap with the passkey</button> <span id="wrap-status"></span></li>
+  <li><button id="unwrap" type="button" disabled>Unwrap with the passkey</button> <span id="unwrap-status"></span></li>
+</ol>
+<p id="status" role="status"></p>
+<p><button id="send" type="button">Send report</button> sends what is on this page now, also while a step waits.</p>
+<h2>If Step 1 Fails or Waits</h2>
+<p><button id="plain" type="button">Create a passkey with standard options</button> <span id="plain-status"></span></p>
+<p>Tells whether the browser can make any passkey here. Reload the page first when a step still waits.</p>
+<h2>What This Browser Reports</h2>
+<pre id="environment">reading...</pre>
+<p>Afterwards, delete the passkey named "keyguard localhost probe" in your password manager.</p>
+<script type="module" src="./probe.js"></script>
+</body>
+</html>

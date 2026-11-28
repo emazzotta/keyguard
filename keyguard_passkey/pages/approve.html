@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f6f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1310" media="(prefers-color-scheme: dark)">
+<title>Keyguard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232c7a4b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7.5' cy='15.5' r='4.5'/%3E%3Cpath d='M10.7 12.3 20 3M17 6l2.5 2.5M14 9l2 2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./unlock.css">
+<link rel="modulepreload" href="./page.js">
+<link rel="modulepreload" href="./unlock-core.js">
+<link rel="modulepreload" href="./owner-message.js">
+<link rel="modulepreload" href="./pin-paste.js">
+<link rel="modulepreload" href="./pin-paste-form.js">
+<link rel="modulepreload" href="./typage.js">
+</head>
+<body>
+<main class="sheet">
+  <header class="intro">
+    <p class="brand">Keyguard</p>
+    <h1 id="title">Approve a secret request</h1>
+    <p class="lead" id="lead"></p>
+  </header>
+
+  <form id="setup" class="panel form" hidden>
+    <div class="row" id="requester-row" hidden>
+      <label for="requester">Machine</label>
+      <select id="requester"></select>
+    </div>
+    <label for="pubkey" id="pubkey-label">Signing key (base64)</label>
+    <input id="pubkey" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="44-character base64 key">
+    <div id="held" class="held" hidden>
+      <p class="held-title">Pinned in this browser</p>
+      <ul id="held-rows" class="pin-rows held-rows"></ul>
+    </div>
+    <label for="pins" id="pins-label" hidden>Signing keys, one line a machine: its id, a space and its key</label>
+    <textarea id="pins" rows="4" autocapitalize="off" autocomplete="off" spellcheck="false"
+              placeholder="devbox &lt;base64 key&gt;" hidden></textarea>
+    <ul id="pin-rows" class="pin-rows" hidden></ul>
+    <button type="submit" id="pin" class="primary">Pin this key</button>
+    <div class="note">
+      <p>Derive it from the machine's Ed25519 signing key:</p>
+      <pre>openssl pkey -in signing.key -pubout -outform DER | tail -c 32 | base64</pre>
+      <p>It is stored in this browser only, out of the service's reach, so a compromised service cannot forge a
+         request you would approve.</p>
+    </div>
+  </form>
+
+  <section id="review" class="panel" hidden>
+    <dl class="facts">
+      <div id="host-row" hidden><dt>Host</dt><dd><code id="host" class="host"></code></dd></div>
+      <div id="session-row" hidden>
+        <dt>Asking session</dt>
+        <dd><span id="session-title" class="session-title"></span> <code id="session-id"></code></dd>
+      </div>
+      <div id="target-row" hidden><dt>To</dt><dd id="target" class="session-title"></dd></div>
+      <div id="message-row" hidden><dt>Message</dt><dd><p id="message" class="message"></p></dd></div>
+      <div id="names-row"><dt id="names-label">Secrets</dt><dd><ul class="chips" id="names"></ul></dd></div>
+    </dl>
+    <p class="age" id="age" hidden></p>
+    <div class="row" id="enrolment-row" hidden>
+      <label for="enrolment">Unlock with</label>
+      <select id="enrolment"></select>
+    </div>
+    <button id="approve" class="primary" disabled>Approve with passkey</button>
+    <button type="button" id="trust" class="quiet" hidden>Trust the new recipient set</button>
+  </section>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <a id="back" class="quiet" hidden>Back to the request</a>
+
+  <button type="button" id="refuse" class="quiet" hidden>Refuse</button>
+  <a id="editkey" class="quiet" hidden>Change pinned key</a>
+</main>
+
+<script type="module" src="./approve.js"></script>
+</body>
+</html>
