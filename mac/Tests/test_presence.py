@@ -157,4 +157,4 @@ def test_should_read_the_configured_folder_at_the_time_the_clock_gives(folder, m
     (Presence.UNKNOWN, False),
 ])
 def test_should_count_unknown_as_away_when_asking_whether_the_owner_is_attending(seen, attended):
-    assert seen.attended is attended
+    assert presence.attended(seen) is attended

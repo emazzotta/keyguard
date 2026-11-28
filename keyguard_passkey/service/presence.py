@@ -2,7 +2,8 @@
 
 The folder holds one file per instance, and the writer builds each in a dot-named temporary file that it renames over
 the instance's file. A line is `<epoch-seconds> <kind>`, with kind `computer` or `phone`, and counts while it is younger
-than 120 seconds. The same reader lives in the dotfiles, as bin/presence.py: change the rules in both.
+than 120 seconds. The Mac server reads it through a link (mac/src/keyguard_server/presence_rules.py). The dotfiles
+keep their own reader, as bin/presence.py: change the rules in both.
 """
 from __future__ import annotations
 

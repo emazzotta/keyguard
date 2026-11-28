@@ -218,7 +218,7 @@ Each web terminal instance writes a file in `~/.claude/presence/`, with one line
 - `computer` wins over `phone` when both are fresh. A line dated in the future is fresh. A bad line, a dot-named file and a file that vanishes while it is read count as no line.
 - Touch ID shows at once in every case. Presence only decides when the phone is asked too.
 - Until the Mac's web terminal writes the folder, every read is `unknown`, so every read asks the phone at once.
-- The same rules live in `src/keyguard_server/presence.py`, [`keyguard_passkey/service/presence.py`](../keyguard_passkey/service/presence.py) and the owner's dotfiles (`bin/presence.py`): change all three together.
+- The rules are [`keyguard_passkey/service/presence.py`](../keyguard_passkey/service/presence.py), which the server reads through the link `src/keyguard_server/presence_rules.py`.
 
 #### Failure reports
 

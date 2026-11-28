@@ -37,7 +37,7 @@ from .config import (
 )
 from .failure_report import ReadFailure, Reason
 from .keyguard_cli import CliResult
-from .presence import Presence
+from .presence import Presence, attended
 
 _EXPORT = "export"
 _PANE_ENV = "TMUX_PANE"
@@ -200,7 +200,7 @@ class _Race:
         prompt = keyguard_cli.get_args(*keys, cache_duration=cache_duration, caller=caller.label)
         self._touch_id = _Child(Side.TOUCH_ID, keyguard_cli.command(prompt), None, self._exits,
                                 timing.touch_id_timeout)
-        self._phone_delay = timing.delay if outside.presence_reader().attended else 0.0
+        self._phone_delay = timing.delay if attended(outside.presence_reader()) else 0.0
         self._report_failure = outside.report_failure
         self._phone: _Child | None = None
         self._touch_id_failure: CliResult | None = None

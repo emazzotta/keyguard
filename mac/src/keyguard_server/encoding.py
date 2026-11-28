@@ -1,26 +1,11 @@
-"""Wire-format helpers for multi-key responses (base64 escapes for multi-line values)."""
+"""Wire-format helpers for multi-key responses. A value travels on one line as keyguard-passkey encodes it:
+line_encoding.py links to keyguard_passkey/encoding.py, and `make install` copies it beside this module."""
 from __future__ import annotations
 
-import base64
+from .line_encoding import from_one_line as decode_value
+from .line_encoding import on_one_line as encode_value
 
-_BASE64_PREFIX = "base64:"
-
-
-def decode_value(value: str) -> str:
-    if value.startswith(_BASE64_PREFIX):
-        try:
-            return base64.b64decode(value[len(_BASE64_PREFIX):], validate=True).decode("utf-8")
-        except (ValueError, UnicodeDecodeError):
-            pass
-    return value
-
-
-def encode_value(value: str) -> str:
-    """Base64 after the marker for a value with a line break or the marker at its start, as keyguard-passkey's
-    provider contract (`docs/provider.md`) and the Swift `onOneLine` do, so `decode_value` gives the value back."""
-    if "\n" in value or "\r" in value or value.startswith(_BASE64_PREFIX):
-        return _BASE64_PREFIX + base64.b64encode(value.encode("utf-8")).decode("ascii")
-    return value
+__all__ = ["decode_value", "encode_value", "format_response", "parse_key_value_output", "parse_timeout"]
 
 
 def format_response(keys: list[str], values: dict[str, str | None]) -> str:
