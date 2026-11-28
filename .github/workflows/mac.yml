@@ -38,4 +38,5 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
-      - run: make test-python
+      # No fixed pytest supports 3.9, so the locks leave it out there (pyproject.toml, dev).
+      - run: make test-python PYTEST_WITH="${{ matrix.python-version == '3.9' && '--with pytest==8.4.2' || '' }}"

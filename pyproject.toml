@@ -37,7 +37,8 @@ packages = ["keyguard_passkey"]
 [dependency-groups]
 dev = [
     "mypy",
-    "pytest",
+    # pytest 9.0.3 fixes its temporary-folder flaw and needs Python 3.10. CI's 3.9 job adds 8.4.2 itself.
+    "pytest>=9.0.3; python_version >= '3.10'",
     "ruff",
 ]
 

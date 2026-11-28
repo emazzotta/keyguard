@@ -38,7 +38,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends age
       - run: uv sync --locked
-      - run: uv run --locked pytest -v
+      # No fixed pytest supports 3.9, so the locks leave it out there (pyproject.toml, dev).
+      - run: uv run --locked ${{ matrix.python-version == '3.9' && '--with pytest==8.4.2' || '' }} pytest -v
 
   browser:
     runs-on: ubuntu-latest

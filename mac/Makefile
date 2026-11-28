@@ -8,6 +8,7 @@ SECRETS_FILE       ?= $(or $(KEYGUARD_SECRETS_FILE),$(HOME)/.keyguard/secrets.en
 STORE_URL          ?= $(KEYGUARD_STORE_URL)
 BRIDGE_CONFIG_FILE ?= $(or $(KEYGUARD_BRIDGE_CONFIG_FILE),$(HOME)/.mac-bridge-endpoints.yaml)
 LOG_FILE           ?= $(or $(KEYGUARD_LOG_FILE),$(HOME)/.keyguard/access.log)
+PYTEST_WITH        ?=
 PHONE_CLIENT_PYZ   ?= $(or $(KEYGUARD_PHONE_CLIENT_PYZ),$(HOME)/Projects/private/personal-infra/apps/devbox/unlock/keyguard-passkey.pyz)
 PHONE_SIGNING_KEY  ?= $(or $(KEYGUARD_PHONE_SIGNING_KEY),$(HOME)/.keyguard/mac-sign.key)
 
@@ -73,7 +74,7 @@ test-cli: ## Drive the whole CLI end to end (Linux only; skips elsewhere)
 	@bash Tests/linux-cli-test.sh
 
 test-python: ## Run Python tests
-	uv run --locked python3 -m pytest Tests/ -v
+	uv run --locked $(PYTEST_WITH) python3 -m pytest Tests/ -v
 
 install: build ## Install binary, server, and register launchd agent
 	sudo install -d "$(PREFIX)/bin" "$(SERVER_DIR)" "$(SERVER_DIR)/keyguard_server"
