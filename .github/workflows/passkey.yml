@@ -1,10 +1,14 @@
-name: Pipeline
+name: Passkey
 
+# A change under mac/ alone runs mac.yml only. A push to main here builds the unlock service's image, which Flux rolls
+# out, so a Mac commit must not start it. Path filters do not apply to tag pushes: a release tag always runs.
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore: ["mac/**", ".github/workflows/mac.yml"]
   pull_request:
+    paths-ignore: ["mac/**", ".github/workflows/mac.yml"]
   workflow_dispatch:
   schedule:
     - cron: "17 4 * * 1"
@@ -115,7 +119,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6.2.0
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/emazzotta/keyguard-passkey
           flavor: latest=false
           tags: |
             type=raw,value={{date 'YYYYMMDDHHmmss'}}-{{sha}},enable={{is_default_branch}}

@@ -1,9 +1,16 @@
-name: Pipeline
+name: Mac
 
+# The CLI test syncs with the unlock service from keyguard_passkey/, so a change there runs this too.
 on:
   push:
     branches: [main]
+    paths: ["mac/**", "keyguard_passkey/**", "keyguard-passkey", ".github/workflows/mac.yml"]
   pull_request:
+    paths: ["mac/**", "keyguard_passkey/**", "keyguard-passkey", ".github/workflows/mac.yml"]
+
+defaults:
+  run:
+    working-directory: mac
 
 jobs:
   swift:
