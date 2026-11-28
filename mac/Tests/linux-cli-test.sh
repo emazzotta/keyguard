@@ -138,18 +138,18 @@ commit_from_another_device() {
 
 remote_sync_tests() {
     local keyguard="$1"
-    local client_pyz port url ready
-    client_pyz="${KEYGUARD_PASSKEY_PYZ:-$REPO_ROOT/../personal-infra/apps/devbox/unlock/keyguard-passkey.pyz}"
+    local client port url ready
+    client="${KEYGUARD_PASSKEY_PYZ:-$REPO_ROOT/../keyguard-passkey}"
 
-    if [ ! -f "$client_pyz" ]; then
-        echo "  - keyguard-passkey.pyz not found, skipping ($client_pyz)"
+    if [ ! -f "$client" ]; then
+        echo "  - keyguard-passkey client not found, skipping ($client)"
         return 0
     fi
 
     mkdir -p "$work/service"
     port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
     url="http://127.0.0.1:$port"
-    KEYGUARD_PASSKEY_STORE="$work/service" KEYGUARD_PASSKEY_PORT="$port" python3 "$client_pyz" serve >/dev/null 2>&1 &
+    KEYGUARD_PASSKEY_STORE="$work/service" KEYGUARD_PASSKEY_PORT="$port" python3 "$client" serve >/dev/null 2>&1 &
     service_pid=$!
 
     export KEYGUARD_STORE_URL="$url"
