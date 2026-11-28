@@ -136,6 +136,46 @@ commit_from_another_device() {
         "$url/store/commit"
 }
 
+# Reads NAME from the service's own files with KEY, as the approve page does with the store key its passkey unwraps.
+phone_reads() {
+    local url="$1" key="$2" name="$3"
+    python3 - "$url" "$key" "$name" <<'PY'
+import json, subprocess, sys, urllib.request
+
+url, key, name = sys.argv[1:]
+
+
+def opened(path):
+    request = urllib.request.Request(f"{url}/store/{path}", headers={"Tailscale-User-Login": "tester"})
+    with urllib.request.urlopen(request) as response:
+        sealed = response.read()
+    plain = subprocess.run(["age", "-d", "-i", key], input=sealed, capture_output=True, check=True).stdout
+    return json.loads(plain[4:4 + int.from_bytes(plain[:4], "big")])
+
+
+print(opened(opened("index.age")["entries"][name]["file"])["value"])
+PY
+}
+
+# The joint setup of the README: the Mac's store is on the service, the phone's enrolment shows a new key, and
+# `keyguard add-recipient` re-seals the store for it and sends it. Removing the key afterwards leaves the store as
+# the later tests expect it, apart from the recipient-set version.
+store_for_both_keys_tests() {
+    local keyguard="$1" url="$2" phone before
+    age-keygen -o "$work/phone.key" 2>/dev/null
+    phone="$(age-keygen -y "$work/phone.key" 2>/dev/null)"
+    before="$(service_meta_field "$url" 'd["version"]')"
+    "$keyguard" add-recipient "$phone" >/dev/null 2>&1
+    assert_equals "should send the store re-sealed for the phone's key" \
+        "$((before + 1))" "$(service_meta_field "$url" 'd["version"]')"
+    assert_equals "should let the phone's key read a secret from the service's files" \
+        "jira-value" "$(phone_reads "$url" "$work/phone.key" JIRA_TOKEN 2>/dev/null)"
+    assert_equals "should still read the secret on the Mac" "jira-value" "$("$keyguard" get JIRA_TOKEN)"
+    "$keyguard" remove-recipient "$phone" >/dev/null 2>&1
+    assert_equals "should lock the removed phone key out of the service's files" "" \
+        "$(phone_reads "$url" "$work/phone.key" JIRA_TOKEN 2>/dev/null)"
+}
+
 remote_sync_tests() {
     local keyguard="$1"
     local client port url ready
@@ -210,6 +250,8 @@ WEIRD" "$("$keyguard" list)"
         "$("$keyguard" pull --discard-local 2>&1)" "version 8"
     assert_contains "should no longer hold the discarded secret" \
         "$("$keyguard" get GONE_KEY 2>&1)" "Keys not found: GONE_KEY"
+
+    store_for_both_keys_tests "$keyguard" "$url"
 
     kill "$service_pid" 2>/dev/null
     wait "$service_pid" 2>/dev/null
@@ -371,14 +413,15 @@ WEIRD" "$("$keyguard" list)"
     echo ""
     echo "add-recipient"
     age-keygen -o "$work/recip2.key" 2>/dev/null
-    local recip2
+    local recip2 set_version
     recip2="$(age-keygen -y "$work/recip2.key" 2>/dev/null)"
+    set_version="$(python3 -c "import json; print(json.load(open('$KEYGUARD_RECIPIENTS_FILE'))['version'])")"
     output="$("$keyguard" add-recipient "$recip2" --tier high 2>&1)"
-    assert_contains "should report the bumped recipient-set version" "$output" "version 2"
+    assert_contains "should report the bumped recipient-set version" "$output" "version $((set_version + 1))"
     assert_equals "should still read a secret as the owner after reseal" \
         "jira-value" "$("$keyguard" get JIRA_TOKEN)"
     assert_contains "should stay intact after reseal" "$("$keyguard" verify 2>&1)" "is intact"
-    assert_equals "should record version 2 in the pinned recipient set" "2" \
+    assert_equals "should record the bumped version in the pinned recipient set" "$((set_version + 1))" \
         "$(python3 -c "import json; print(json.load(open('$KEYGUARD_RECIPIENTS_FILE'))['version'])")"
     local varfile
     # Skip the placeholder files that the sync tests commit as another device: they hold no age file.
@@ -391,7 +434,7 @@ WEIRD" "$("$keyguard" list)"
     echo ""
     echo "remove-recipient"
     output="$("$keyguard" remove-recipient "$recip2" --tier high 2>&1)"
-    assert_contains "should report the bumped recipient-set version after removal" "$output" "version 3"
+    assert_contains "should report the bumped recipient-set version after removal" "$output" "version $((set_version + 2))"
     assert_equals "should still read a secret as the owner after removal" \
         "jira-value" "$("$keyguard" get JIRA_TOKEN)"
     assert_contains "should stay intact after removal" "$("$keyguard" verify 2>&1)" "is intact"

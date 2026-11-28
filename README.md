@@ -249,7 +249,16 @@ Joined, the two share one store at the unlock service:
 - **Owner signatures.** `POST /_owner/sign` on the Mac goes through the same client to the approve page, which signs ([Owner Signatures](docs/service.md#owner-signatures)).
 - **Keys.** The Mac decrypts with its age key in the Keychain, the phone with the store key that its passkey unwraps, so both keys must be recipients of the store. The phone pins the store's recipients and refuses a set that changed.
 
-Tested: the Mac kit's CLI test runs the sync against the unlock service of this repository. Not tested: the first setup of one store for both keys, and one local store that both commands open on the same machine.
+### Setting Up One Store for Both
+
+The Mac creates the store, and the phone joins it. The other way round does not work: the phone has no command that adds the Mac's key to a store it created.
+
+1. **The Mac's store.** Set `KEYGUARD_STORE_URL` to the unlock service and run `keyguard init`, or `keyguard migrate` for an old secrets file. Either one sends the store to the service. An existing store goes up with `keyguard push`.
+2. **The phone's key.** On the phone, open `<service>/enroll`. On a store that exists, the page makes the passkey and a new store key, and shows the key's public half, `age1...`.
+3. **Both keys on the store.** On the Mac, run `keyguard add-recipient age1...`. It re-encrypts every secret for both keys and sends the store to the service. The phone pins this recipient set on its first approval.
+4. **The machines that ask.** Write the phone's public key into each machine's `remote-recipient` file, and pin each machine on the phone ([First Setup](docs/service.md#first-setup), steps 2 and 3).
+
+Tested: the Mac kit's CLI test runs the sync against the unlock service of this repository, and steps 1 to 3 with a stand-in for the phone's key, which then reads a secret from the service's files as the approve page does. Not tested: the enrol page on a store that the Mac created, and one local store that both commands open on the same machine.
 
 ## License
 
