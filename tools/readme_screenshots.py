@@ -5,6 +5,7 @@ uv run --locked --with playwright==1.63.0 --with pillow --with pyyaml python3 to
 
 The Mac kit's pictures come from its real HTTP server, run here with a stand-in for the Swift command that answers
 every Touch ID prompt with yes and records its reason. The server writes the bridge reasons and the access log.
+mac-help.png needs `keyguard help 2>&1` captured on a Mac, passed as --keyguard-help FILE.
 
 The pages name macOS system fonts. Where those are missing, install Source Serif 4, Inter and JetBrains Mono:
 the pictures then use them in their place.
@@ -56,7 +57,7 @@ FONTS: Final = """:root:root { --font-display: "Source Serif 4", serif; --font-b
   --font-mono: "JetBrains Mono", monospace; }"""
 TERMINAL_PAGE: Final = """<!doctype html><meta charset="utf-8"><style>
 body { margin: 0; padding: 28px; font: 14px/1.6 "JetBrains Mono", monospace; }
-.window { width: 720px; background: #101512; color: #d7e0d9; border-radius: 12px; overflow: hidden; }
+.window { width: WIDTHpx; background: #101512; color: #d7e0d9; border-radius: 12px; overflow: hidden; }
 .bar { height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #1a211c; }
 .bar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
 .bar span { margin-left: 12px; color: #7f8c83; font-size: 12px; }
@@ -64,6 +65,7 @@ pre { margin: 0; padding: 18px 22px 22px; font: inherit; white-space: pre-wrap; 
 .prompt { color: #6fcf97; } .cmd { color: #f2f5f3; } .note { color: #e2b866; } .out { color: #aab6ad; }
 </style><div class="window"><div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i>
 <i style="background:#28c840"></i><span>TITLE</span></div><pre>SESSION</pre></div>"""
+HELP_WIDTH: Final = 840  # keyguard help's longest line, 80 characters, without a wrap
 MAC_SERVER: Final = REPOSITORY / "mac" / "src"
 MAC_HOST: Final = "http://host.docker.internal:7777"
 MAC_SESSION: Final = {"X-Keyguard-Session": "4b7e19c2", "X-Keyguard-Title": "Fix CI"}
@@ -203,8 +205,9 @@ def capture_terminal(browser: sync_api.Browser, folder: Path, out: Path) -> None
     shoot_terminal(page, "~/my-project", render(steps, folder), out / "terminal.png")
 
 
-def shoot_terminal(page: sync_api.Page, title: str, session: str, path: Path) -> None:
-    page.set_content(TERMINAL_PAGE.replace("TITLE", html.escape(title)).replace("SESSION", session))
+def shoot_terminal(page: sync_api.Page, title: str, session: str, path: Path, width: int = 720) -> None:
+    page.set_content(TERMINAL_PAGE.replace("WIDTH", str(width)).replace("TITLE", html.escape(title))
+                     .replace("SESSION", session))
     page.evaluate("() => document.fonts.ready.then(() => true)")
     save(page.locator(".window").screenshot(omit_background=True), path)
     page.context.close()
@@ -327,10 +330,19 @@ def capture_mac(browser: sync_api.Browser, folder: Path, out: Path) -> None:
     shoot_terminal(new_page(browser, "dark"), "a container on the Mac", render(bridge, folder), out / "mac-bridge.png")
 
 
+def capture_mac_help(browser: sync_api.Browser, help_text: Path, out: Path) -> None:
+    step = Step("keyguard help", help_text.read_text(encoding="utf-8").rstrip("\n"), "")
+    page = new_page(browser, "dark")
+    page.set_viewport_size({"width": HELP_WIDTH + 80, "height": VIEWPORT["height"]})
+    shoot_terminal(page, "~ on the Mac", render([step], help_text.parent), out / "mac-help.png", HELP_WIDTH)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=REPOSITORY / "docs" / "images", help="folder for the pictures")
-    out: Path = parser.parse_args().out
+    parser.add_argument("--keyguard-help", type=Path, help="the output of `keyguard help 2>&1` on a Mac")
+    args = parser.parse_args()
+    out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as folder, sync_api.sync_playwright() as playwright:
         browser = playwright.chromium.launch(args=["--disable-dev-shm-usage"])
@@ -338,6 +350,8 @@ def main() -> None:
             capture_pages(browser, scheme, Path(folder), out)
         capture_terminal(browser, Path(folder), out)
         capture_mac(browser, Path(folder), out)
+        if args.keyguard_help:
+            capture_mac_help(browser, args.keyguard_help, out)
         browser.close()
 
 

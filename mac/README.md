@@ -75,6 +75,8 @@ For the [phone fallback](#phone-fallback), pass the client from a release: downl
 
 ## Managing secrets
 
+<img src="../docs/images/mac-help.png" alt="keyguard help on a Mac: the commands, the environment variables and examples" width="840">
+
 **Import from an existing `.env` file (additive: merges with existing secrets):**
 ```bash
 keyguard import path/to/.env           # prompts for each conflicting key
