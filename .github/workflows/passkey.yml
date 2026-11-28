@@ -67,10 +67,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
+      # The whole history on every run. gitleaks-action scans a pull request from its first commit's parent, and a
+      # range that holds a root commit (keyguard-passkey's history, merged in) has none, so its git log fails.
+      - name: Scan the whole history
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo"
+          ghcr.io/gitleaks/gitleaks:v8.24.3 git /repo --redact --verbose --exit-code 1
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
