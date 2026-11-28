@@ -1,6 +1,8 @@
 """Unit tests for the wire-format encoding helpers."""
 import base64
 
+import pytest
+
 from keyguard_server.encoding import (
     decode_value,
     encode_value,
@@ -31,6 +33,14 @@ def test_encode_value_multiline_uses_base64():
     result = encode_value("line1\nline2")
     assert result.startswith("base64:")
     assert decode_value(result) == "line1\nline2"
+
+
+@pytest.mark.parametrize("value", ["base64:aGVsbG8=", "a\rb", "a\r\nb"])
+def test_should_encode_and_round_trip_when_value_has_marker_or_carriage_return(value):
+    result = encode_value(value)
+
+    assert result.startswith("base64:")
+    assert decode_value(result) == value
 
 
 def test_format_response_single_key_returns_raw():

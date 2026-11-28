@@ -27,11 +27,7 @@ func confirmOverwrite(_ name: String) -> Bool {
 }
 
 func emit(name: String, value: String) {
-    if value.contains("\n") {
-        print("\(name)=base64:\(Data(value.utf8).base64EncodedString())")
-    } else {
-        print("\(name)=\(value)")
-    }
+    print("\(name)=\(onOneLine(value))")
 }
 
 func printUsage() {

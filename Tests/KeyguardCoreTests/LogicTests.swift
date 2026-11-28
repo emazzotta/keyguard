@@ -68,6 +68,17 @@ struct TestRunner {
         checkDict("round-trip multiline",  parseEnv(serializeEnv(["JSON": multiLineJson, "PLAIN": "hello"])),
                                            ["JSON": multiLineJson, "PLAIN": "hello"])
 
+        print("\nonOneLine")
+        let marked = "base64:aGVsbG8="
+        checkStr("plain value as it is",           onOneLine("abc=="), "abc==")
+        checkStr("value with the marker encoded",  onOneLine(marked),
+                 "base64:\(Data(marked.utf8).base64EncodedString())")
+        checkStr("carriage return encoded",        onOneLine("a\rb"), "base64:\(Data("a\rb".utf8).base64EncodedString())")
+        checkStr("CRLF encoded",                   onOneLine("a\r\nb"),
+                 "base64:\(Data("a\r\nb".utf8).base64EncodedString())")
+        checkDict("round-trip of a marked value",  parseEnv(serializeEnv(["K": marked])), ["K": marked])
+        checkDict("round-trip of CRLF",            parseEnv(serializeEnv(["K": "a\r\nb"])), ["K": "a\r\nb"])
+
         func checkArgs(_ desc: String, _ actual: ParsedArgs, positional: [String], cacheDuration: Int?,
                        caller: String? = nil) {
             if actual.positional == positional && actual.cacheDuration == cacheDuration && actual.caller == caller {

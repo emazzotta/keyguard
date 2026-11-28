@@ -16,7 +16,9 @@ def decode_value(value: str) -> str:
 
 
 def encode_value(value: str) -> str:
-    if "\n" in value:
+    """Base64 after the marker for a value with a line break or the marker at its start, as keyguard-passkey's
+    provider contract (`docs/provider.md`) and the Swift `onOneLine` do, so `decode_value` gives the value back."""
+    if "\n" in value or "\r" in value or value.startswith(_BASE64_PREFIX):
         return _BASE64_PREFIX + base64.b64encode(value.encode("utf-8")).decode("ascii")
     return value
 

@@ -30,15 +30,17 @@ public func parseEnv(_ content: String) -> [String: String] {
     return entries
 }
 
+/// A value as one line of `NAME=value` output: base64 after the marker when it holds a line break, or when it starts
+/// with the marker itself, so a reader that decodes the marker gets the value back (keyguard-passkey `docs/provider.md`).
+/// Line breaks are scalars, not characters: Swift counts `\r\n` as one character that `contains("\n")` misses.
+public func onOneLine(_ value: String) -> String {
+    let holdsLineBreak = value.unicodeScalars.contains { $0 == "\n" || $0 == "\r" }
+    guard holdsLineBreak || value.hasPrefix(base64Prefix) else { return value }
+    return base64Prefix + Data(value.utf8).base64EncodedString()
+}
+
 public func serializeEnv(_ entries: [String: String]) -> String {
-    entries.keys.sorted().map { key in
-        let value = entries[key]!
-        if value.contains("\n") {
-            let encoded = Data(value.utf8).base64EncodedString()
-            return "\(key)=\(base64Prefix)\(encoded)"
-        }
-        return "\(key)=\(value)"
-    }.joined(separator: "\n")
+    entries.keys.sorted().map { "\($0)=\(onOneLine(entries[$0]!))" }.joined(separator: "\n")
 }
 
 public struct ParsedArgs {
