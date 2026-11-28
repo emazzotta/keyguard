@@ -41,7 +41,7 @@ python3 keyguard-passkey/keyguard-passkey version
 Or as a command on your `PATH`, at a release:
 
 ```bash
-uv tool install git+https://github.com/emazzotta/keyguard-passkey@v0.7.4
+uv tool install git+https://github.com/emazzotta/keyguard-passkey@v0.8.0
 keyguard-passkey version
 ```
 
